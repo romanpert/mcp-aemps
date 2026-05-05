@@ -79,23 +79,12 @@ ci: add pytest matrix for python 3.11/3.12/3.13
 7. Maintainer review — expect feedback within 5 business days.
 8. Squash-merge into `dev`. Branch auto-deletes.
 
-### Release workflow (maintainer only)
+### Release workflow
 
-```bash
-# 1. cut from dev
-git checkout dev && git pull
-git checkout -b release/v0.X.Y
-# 2. bump pyproject.toml version + CHANGELOG.md
-# 3. PR release/v0.X.Y → master, self-approve, squash-merge
-# 4. tag the merge commit
-git checkout master && git pull
-git tag -a v0.X.Y -m "v0.X.Y"
-git push origin v0.X.Y
-# 5. release.yml workflow auto-publishes to PyPI (Trusted Publisher OIDC)
-#    and to MCP Registry (github-oidc). No manual tokens.
-# 6. fast-forward dev with master
-git checkout dev && git merge --ff-only master && git push
-```
+Releases are fully automated. As a contributor you do **not** push to
+`master` directly. The maintainer cuts the release from `dev` and tags it;
+the `release.yml` workflow handles PyPI publication (Trusted Publisher OIDC)
+and MCP Registry submission (github-oidc) — no manual tokens involved.
 
 ---
 

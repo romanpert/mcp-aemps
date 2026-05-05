@@ -1,7 +1,7 @@
 """Tests for the auto-install commands.
 
 Always pass `config_path` to keep tests hermetic — never touches the user's
-real Claude / Codex configs.
+real Claude / Codex / VSCode / Cursor / Windsurf configs.
 """
 
 from __future__ import annotations
@@ -13,33 +13,44 @@ from app.installers import (
     install_claude_code,
     install_claude_desktop,
     install_codex,
+    install_cursor,
+    install_vscode,
+    install_windsurf,
     uninstall_claude_code,
     uninstall_claude_desktop,
+    uninstall_cursor,
+    uninstall_vscode,
+    uninstall_windsurf,
 )
 
 
 # --- Claude Desktop -------------------------------------------------------
-def test_claude_desktop_add_idempotent_update(tmp_path: Path) -> None:
+def test_claude_desktop_uses_mcp_remote_bridge(tmp_path: Path) -> None:
+    """Claude Desktop config must use the npx mcp-remote bridge — bare {url} is rejected."""
     p = tmp_path / "claude_desktop_config.json"
+    install_claude_desktop(url="http://localhost:9000/mcp", config_path=p)
+    data = json.loads(p.read_text(encoding="utf-8"))
+    entry = data["mcpServers"]["mcp-aemps"]
+    assert entry["command"] == "npx"
+    assert "mcp-remote" in entry["args"]
+    assert "http://localhost:9000/mcp" in entry["args"]
+    assert "url" not in entry
 
+
+def test_claude_desktop_idempotent(tmp_path: Path) -> None:
+    p = tmp_path / "claude_desktop_config.json"
     r1 = install_claude_desktop(url="http://localhost:9000/mcp", config_path=p)
     assert r1.action == "added"
-
     r2 = install_claude_desktop(url="http://localhost:9000/mcp", config_path=p)
     assert r2.action == "unchanged"
-
     r3 = install_claude_desktop(url="http://localhost:8080/mcp", config_path=p)
     assert r3.action == "updated"
-
-    data = json.loads(p.read_text(encoding="utf-8"))
-    assert data["mcpServers"]["mcp-aemps"]["url"] == "http://localhost:8080/mcp"
 
 
 def test_claude_desktop_preserves_other_entries(tmp_path: Path) -> None:
     p = tmp_path / "claude_desktop_config.json"
     p.write_text(json.dumps({"mcpServers": {"existing-server": {"command": "foo"}}}))
-
-    install_claude_desktop(config_path=p)
+    install_claude_desktop(url="http://localhost:9000/mcp", config_path=p)
     data = json.loads(p.read_text(encoding="utf-8"))
     assert "existing-server" in data["mcpServers"]
     assert "mcp-aemps" in data["mcpServers"]
@@ -47,11 +58,9 @@ def test_claude_desktop_preserves_other_entries(tmp_path: Path) -> None:
 
 def test_claude_desktop_uninstall_idempotent(tmp_path: Path) -> None:
     p = tmp_path / "claude_desktop_config.json"
-    install_claude_desktop(config_path=p)
-
+    install_claude_desktop(url="http://localhost:9000/mcp", config_path=p)
     r1 = uninstall_claude_desktop(config_path=p)
     assert r1.action == "removed"
-
     r2 = uninstall_claude_desktop(config_path=p)
     assert r2.action == "unchanged"
 
@@ -70,7 +79,7 @@ def test_claude_code_fallback_path(tmp_path: Path) -> None:
 def test_claude_code_preserves_other_entries(tmp_path: Path) -> None:
     p = tmp_path / "claude.json"
     p.write_text(json.dumps({"mcpServers": {"other": {"url": "x"}}}))
-    install_claude_code(config_path=p, use_cli=False)
+    install_claude_code(url="http://localhost:9000/mcp", config_path=p, use_cli=False)
     data = json.loads(p.read_text(encoding="utf-8"))
     assert "other" in data["mcpServers"]
     assert "mcp-aemps" in data["mcpServers"]
@@ -78,7 +87,7 @@ def test_claude_code_preserves_other_entries(tmp_path: Path) -> None:
 
 def test_claude_code_uninstall(tmp_path: Path) -> None:
     p = tmp_path / "claude.json"
-    install_claude_code(config_path=p, use_cli=False)
+    install_claude_code(url="http://localhost:9000/mcp", config_path=p, use_cli=False)
     r = uninstall_claude_code(config_path=p, use_cli=False)
     assert r.action == "removed"
 
@@ -96,7 +105,7 @@ def test_codex_add_to_empty(tmp_path: Path) -> None:
 def test_codex_preserves_other_sections(tmp_path: Path) -> None:
     p = tmp_path / "config.toml"
     p.write_text('[other_section]\nfoo = "bar"\n')
-    install_codex(config_path=p)
+    install_codex(url="http://localhost:9000/mcp", config_path=p)
     text = p.read_text(encoding="utf-8")
     assert "[other_section]" in text
     assert 'foo = "bar"' in text
@@ -110,19 +119,91 @@ def test_codex_idempotent_and_update(tmp_path: Path) -> None:
     assert r2.action == "unchanged"
     r3 = install_codex(url="http://localhost:8080/mcp", config_path=p)
     assert r3.action == "updated"
-    text = p.read_text(encoding="utf-8")
-    assert 'url = "http://localhost:8080/mcp"' in text
+    assert 'url = "http://localhost:8080/mcp"' in p.read_text(encoding="utf-8")
+
+
+# --- VS Code --------------------------------------------------------------
+def test_vscode_writes_nested_mcp_servers(tmp_path: Path) -> None:
+    p = tmp_path / "settings.json"
+    r = install_vscode(url="http://localhost:9000/mcp", config_path=p)
+    assert r.action == "added"
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert data["mcp"]["servers"]["mcp-aemps"] == {
+        "type": "http",
+        "url": "http://localhost:9000/mcp",
+    }
+
+
+def test_vscode_preserves_other_settings(tmp_path: Path) -> None:
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps({"editor.fontSize": 14, "workbench.colorTheme": "Dark"}))
+    install_vscode(url="http://localhost:9000/mcp", config_path=p)
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert data["editor.fontSize"] == 14
+    assert data["workbench.colorTheme"] == "Dark"
+    assert "mcp-aemps" in data["mcp"]["servers"]
+
+
+def test_vscode_uninstall(tmp_path: Path) -> None:
+    p = tmp_path / "settings.json"
+    install_vscode(url="http://localhost:9000/mcp", config_path=p)
+    r = uninstall_vscode(config_path=p)
+    assert r.action == "removed"
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert "mcp-aemps" not in data.get("mcp", {}).get("servers", {})
+
+
+# --- Cursor ---------------------------------------------------------------
+def test_cursor_add(tmp_path: Path) -> None:
+    p = tmp_path / "mcp.json"
+    r = install_cursor(url="http://localhost:9000/mcp", config_path=p)
+    assert r.action == "added"
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert data["mcpServers"]["mcp-aemps"] == {"url": "http://localhost:9000/mcp"}
+
+
+def test_cursor_uninstall(tmp_path: Path) -> None:
+    p = tmp_path / "mcp.json"
+    install_cursor(url="http://localhost:9000/mcp", config_path=p)
+    r = uninstall_cursor(config_path=p)
+    assert r.action == "removed"
+
+
+# --- Windsurf -------------------------------------------------------------
+def test_windsurf_uses_serverUrl_field(tmp_path: Path) -> None:
+    p = tmp_path / "mcp_config.json"
+    r = install_windsurf(url="http://localhost:9000/mcp", config_path=p)
+    assert r.action == "added"
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert data["mcpServers"]["mcp-aemps"]["serverUrl"] == "http://localhost:9000/mcp"
+
+
+def test_windsurf_uninstall(tmp_path: Path) -> None:
+    p = tmp_path / "mcp_config.json"
+    install_windsurf(url="http://localhost:9000/mcp", config_path=p)
+    r = uninstall_windsurf(config_path=p)
+    assert r.action == "removed"
 
 
 # --- Path resolution per platform -----------------------------------------
-def test_path_resolution_returns_path() -> None:
+def test_path_resolution_returns_absolute_path() -> None:
     from app.installers import (
         claude_code_config_path,
         claude_desktop_config_path,
         codex_config_path,
+        cursor_config_path,
+        vscode_settings_path,
+        windsurf_config_path,
     )
 
-    for fn in (claude_desktop_config_path, claude_code_config_path, codex_config_path):
+    for fn in (
+        claude_desktop_config_path,
+        claude_code_config_path,
+        codex_config_path,
+        cursor_config_path,
+        vscode_settings_path,
+        windsurf_config_path,
+    ):
         p = fn()
         assert isinstance(p, Path)
         assert p.is_absolute()

@@ -74,6 +74,12 @@ def create_app(
     _install_default_middleware(app)
     _install_extra_middleware(app, extra_middleware)
 
+    # Lightweight in-process metrics middleware (Community Edition).
+    # For Prometheus/OTel, use the Enterprise edition.
+    from app.metrics import METRICS, metrics_middleware
+
+    app.middleware("http")(metrics_middleware)
+
     @app.get("/health", include_in_schema=False)
     async def health():  # noqa: D401
         return JSONResponse(
@@ -83,6 +89,10 @@ def create_app(
                 "cache": "redis" if getattr(app.state, "redis", None) else "in-memory",
             }
         )
+
+    @app.get("/internal/metrics", include_in_schema=False)
+    async def metrics():  # noqa: D401
+        return JSONResponse(METRICS.snapshot())
 
     app.include_router(medicamentos_router)
     app.include_router(documentos_router)

@@ -32,6 +32,9 @@ app/mcp_aemps.json
 # ── Build artefactos ─────────────────────────────────────────────────────────
 dist/
 
+# ── Marketing assets (private until launched) ────────────────────────────────
+.marketing/
+
 # ── Logs ───────────────────────────────────────────────────────────────────────
 logs/
 *.log

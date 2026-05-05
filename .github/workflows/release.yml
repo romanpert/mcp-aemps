@@ -5,6 +5,10 @@ on:
     tags:
       - "v*.*.*"
 
+# Opt into Node.js 24 for JavaScript-based actions (Node 20 is deprecated).
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   build:
     name: Build distributions
