@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] — 2026-05-05
+
+### Added
+- **Native stdio MCP transport** (Anthropic-canonical pattern) — new
+  `mcp-aemps stdio` command runs the server over stdin/stdout via
+  `mcp.server.fastmcp.FastMCP`. 17 official CIMA tools registered.
+  Clients now configure us with the universal pattern:
+  ```json
+  {"command": "uvx", "args": ["mcp-aemps@latest", "stdio"]}
+  ```
+  No HTTP server, no port management, no `mcp-remote` bridge required.
+- **npm wrapper `mcp-aemps`** (unscoped, `npx mcp-aemps@latest`) — thin
+  Node.js shim that delegates to the Python implementation via `uvx`,
+  with fallback to `pipx run` and pip-installed `mcp-aemps`. Lets users
+  who only have Node tooling install us seamlessly. Published with
+  npm Trusted Publisher (OIDC) — no token in CI.
+- **`.github/workflows/npm.yml`** auto-publishes the npm wrapper on every
+  minor release (`vX.Y.0`), synchronised with the Docker image cadence.
+
+### Changed
+- **Claude Desktop installer default = stdio** (was: `mcp-remote` HTTP
+  bridge). The new entry is `{"command": "uvx", "args":
+  ["mcp-aemps@latest", "stdio"]}`. Falls back to the HTTP bridge with
+  `install_claude_desktop(transport="http", ...)` if you prefer to
+  point Claude Desktop at a long-running shared server.
+- 36 tests (was 32) — added stdio tool surface coverage and a transport
+  switch test for the Claude Desktop installer.
+
+### Architecture
+- New `app/stdio_server.py` — separate transport layer that builds a
+  `FastMCP` instance and registers each tool as a thin wrapper over
+  `cima_client`. Shares the same `cima_client`, `safe_cima_call`,
+  `bounded_gather`, and metadata helpers as the HTTP path, so JSON
+  shapes are identical across transports.
+- `npm/` directory — TypeScript-free wrapper kept minimal (one Node.js
+  script + manifest). Source distributed via `git+https`, so changes
+  flow through `git push` like the rest of the codebase.
+
 ## [0.1.6] — 2026-05-05
 
 ### Fixed
@@ -191,6 +229,7 @@ First public release.
   `Permissions-Policy`.
 - No PII processed: CIMA exposes medicine metadata only.
 
+[0.2.0]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.2.0
 [0.1.6]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.1.6
 [0.1.5]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.1.5
 [0.1.4]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.1.4

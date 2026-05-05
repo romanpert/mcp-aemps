@@ -335,6 +335,23 @@ def openapi(
 
 
 @cli.command()
+def stdio():
+    """Run as a native stdio MCP server (Anthropic-canonical pattern).
+
+    Use this when a client like Claude Desktop or Codex is configured to
+    launch the server itself:
+
+        {"command": "uvx", "args": ["mcp-aemps", "stdio"]}
+
+    No HTTP server is started; the process talks JSON-RPC over
+    stdin/stdout and exits when the client closes the connection.
+    """
+    from app.stdio_server import main as stdio_main
+
+    stdio_main()
+
+
+@cli.command()
 def docs(
     access_host: Optional[str] = typer.Option(None),
     port: Optional[int] = typer.Option(None),

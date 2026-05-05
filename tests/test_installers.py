@@ -25,25 +25,38 @@ from app.installers import (
 
 
 # --- Claude Desktop -------------------------------------------------------
-def test_claude_desktop_uses_mcp_remote_bridge(tmp_path: Path) -> None:
-    """Claude Desktop config must use the npx mcp-remote bridge — bare {url} is rejected."""
+def test_claude_desktop_default_uses_uvx_stdio(tmp_path: Path) -> None:
+    """Default transport is stdio — Claude Desktop launches `uvx mcp-aemps stdio`."""
     p = tmp_path / "claude_desktop_config.json"
-    install_claude_desktop(url="http://localhost:9000/mcp", config_path=p)
+    install_claude_desktop(config_path=p)
+    data = json.loads(p.read_text(encoding="utf-8"))
+    entry = data["mcpServers"]["mcp-aemps"]
+    assert entry["command"] == "uvx"
+    assert "mcp-aemps@latest" in entry["args"]
+    assert "stdio" in entry["args"]
+    # No HTTP url leaked into the entry
+    assert "url" not in entry
+
+
+def test_claude_desktop_http_mode_uses_mcp_remote_bridge(tmp_path: Path) -> None:
+    """transport='http' falls back to npx mcp-remote bridge (for shared HTTP server)."""
+    p = tmp_path / "claude_desktop_config.json"
+    install_claude_desktop(url="http://localhost:9000/mcp", config_path=p, transport="http")
     data = json.loads(p.read_text(encoding="utf-8"))
     entry = data["mcpServers"]["mcp-aemps"]
     assert entry["command"] == "npx"
     assert "mcp-remote" in entry["args"]
     assert "http://localhost:9000/mcp" in entry["args"]
-    assert "url" not in entry
 
 
 def test_claude_desktop_idempotent(tmp_path: Path) -> None:
     p = tmp_path / "claude_desktop_config.json"
-    r1 = install_claude_desktop(url="http://localhost:9000/mcp", config_path=p)
+    r1 = install_claude_desktop(config_path=p)
     assert r1.action == "added"
-    r2 = install_claude_desktop(url="http://localhost:9000/mcp", config_path=p)
+    r2 = install_claude_desktop(config_path=p)
     assert r2.action == "unchanged"
-    r3 = install_claude_desktop(url="http://localhost:8080/mcp", config_path=p)
+    # Switching to http mode must register as 'updated'
+    r3 = install_claude_desktop(url="http://localhost:8080/mcp", config_path=p, transport="http")
     assert r3.action == "updated"
 
 
