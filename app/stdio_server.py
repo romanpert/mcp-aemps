@@ -36,7 +36,26 @@ from app.helpers import (
     safe_cima_call,
 )
 from app.logging_setup import configure_logging
-from app.mcp_constants import MCP_AEMPS_SYSTEM_PROMPT
+from app.mcp_constants import (
+    MCP_AEMPS_SYSTEM_PROMPT,
+    buscar_ficha_tecnica_description,
+    doc_contenido_description,
+    doc_secciones_description,
+    html_ft_description,
+    html_p_description,
+    listar_materiales_description,
+    listar_notas_description,
+    maestras_description,
+    medicamento_description,
+    medicamentos_description,
+    presentacion_description,
+    presentaciones_description,
+    problemas_suministro_dcp_description,
+    problemas_suministro_dcpf_description,
+    problemas_suministro_description,
+    registro_cambios_description,
+    vmpp_description,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,12 +70,11 @@ def build_server() -> FastMCP:
     # ------------------------------------------------------------------
     # Medicamentos
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(description=medicamento_description)
     async def obtener_medicamento(
         cn: str | None = None,
         nregistro: str | None = None,
     ) -> dict[str, Any]:
-        """Obtener ficha completa de un medicamento por CN o nregistro AEMPS."""
         if not (cn or nregistro):
             return {"error": "Se requiere 'cn' o 'nregistro'."}
         result = await safe_cima_call(cima.medicamento, cn=cn, nregistro=nregistro)
@@ -64,7 +82,7 @@ def build_server() -> FastMCP:
         params = {k: v for k, v in {"cn": cn, "nregistro": nregistro}.items() if v}
         return format_response(result, _build_metadata(params))
 
-    @server.tool()
+    @server.tool(description=medicamentos_description)
     async def buscar_medicamentos(
         nombre: str | None = None,
         laboratorio: str | None = None,
@@ -83,7 +101,6 @@ def build_server() -> FastMCP:
         psicotropo: int | None = None,
         pagina: int = 1,
     ) -> dict[str, Any]:
-        """Listado paginado de medicamentos con filtros regulatorios avanzados."""
         params = {k: v for k, v in locals().items() if v is not None}
         result = await safe_cima_call(cima.medicamentos, **params)
         if isinstance(result, dict) and "resultados" in result:
@@ -91,22 +108,15 @@ def build_server() -> FastMCP:
             result["resultados"] = result["resultados"][: settings.max_results]
         return format_response(result, _build_metadata(params))
 
-    @server.tool()
+    @server.tool(description=buscar_ficha_tecnica_description)
     async def buscar_en_ficha_tecnica(reglas: list[dict[str, Any]]) -> dict[str, Any]:
-        """Búsqueda textual dentro de secciones de la ficha técnica.
-
-        `reglas` es una lista de objetos `{seccion, texto, contiene}` donde:
-          - seccion: str (e.g. "4.1")
-          - texto: str a buscar
-          - contiene: 1 si debe contenerlo, 0 si no debe contenerlo
-        """
         result = await safe_cima_call(cima.buscar_en_ficha_tecnica, reglas)
         return format_response(result, _build_metadata({"reglas": reglas}))
 
     # ------------------------------------------------------------------
     # Presentaciones / VMP / Maestras
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(description=presentaciones_description)
     async def listar_presentaciones(
         cn: str | None = None,
         nregistro: str | None = None,
@@ -116,14 +126,12 @@ def build_server() -> FastMCP:
         comerc: int | None = None,
         pagina: int = 1,
     ) -> dict[str, Any]:
-        """Listado paginado de presentaciones con filtros."""
         params = {k: v for k, v in locals().items() if v is not None}
         result = await safe_cima_call(cima.presentaciones, **params)
         return format_response(result, _build_metadata(params))
 
-    @server.tool()
+    @server.tool(description=presentacion_description)
     async def obtener_presentacion(cn: list[str]) -> dict[str, Any]:
-        """Detalle de una o varias presentaciones por Código Nacional (paraleliza)."""
         if not cn:
             return {"error": "Se requiere al menos un 'cn'."}
         coros = [safe_cima_call(cima.presentacion, c) for c in cn]
@@ -140,7 +148,7 @@ def build_server() -> FastMCP:
             payload["errors"] = errors
         return format_response(payload, _build_metadata({"cn": cn}))
 
-    @server.tool()
+    @server.tool(description=vmpp_description)
     async def buscar_vmpp(
         practiv1: str | None = None,
         idpractiv1: str | None = None,
@@ -151,12 +159,11 @@ def build_server() -> FastMCP:
         modoArbol: int | None = None,
         pagina: int = 1,
     ) -> dict[str, Any]:
-        """Equivalentes clínicos VMP/VMPP filtrables (principio activo, dosis, forma, ATC, …)."""
         params = {k: v for k, v in locals().items() if v is not None}
         result = await safe_cima_call(cima.vmpp, **params)
         return format_response(result, _build_metadata(params))
 
-    @server.tool()
+    @server.tool(description=maestras_description)
     async def consultar_maestras(
         maestra: int,
         nombre: str | None = None,
@@ -167,7 +174,6 @@ def build_server() -> FastMCP:
         enuso: int | None = None,
         pagina: int = 1,
     ) -> dict[str, Any]:
-        """Catálogos maestros AEMPS (1=ppio activo, 3=forma, 4=vía, 6=labs, 7=ATC, …)."""
         params = {k: v for k, v in locals().items() if v is not None}
         result = await safe_cima_call(cima.maestras, **params)
         return format_response(result, _build_metadata(params))
@@ -175,24 +181,22 @@ def build_server() -> FastMCP:
     # ------------------------------------------------------------------
     # Vigilancia
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(description=registro_cambios_description)
     async def registro_cambios(
         fecha: str | None = None,
         nregistro: list[str] | None = None,
         metodo: str = "GET",
     ) -> dict[str, Any]:
-        """Historial de altas/bajas/modificaciones de medicamentos. `fecha` formato dd/mm/yyyy."""
         result = await safe_cima_call(cima.registro_cambios, fecha=fecha, nregistro=nregistro, metodo=metodo)
         return format_response(result, _build_metadata({"fecha": fecha, "nregistro": nregistro}))
 
-    @server.tool()
+    @server.tool(description=problemas_suministro_description)
     async def problemas_suministro(
         cn: list[str] | None = None,
         nregistro: list[str] | None = None,
         pagina: int = 1,
         tamanioPagina: int = 25,
     ) -> dict[str, Any]:
-        """Problemas de suministro: global paginado o detalle por CN (v2 con fallback v1)."""
         meta = _build_metadata(
             {"cn": cn, "nregistro": nregistro, "pagina": pagina, "tamanioPagina": tamanioPagina},
             API_PSUM_VERSION,
@@ -230,21 +234,18 @@ def build_server() -> FastMCP:
                 data[c] = resp
         return format_response({"data": data}, meta)
 
-    @server.tool()
+    @server.tool(description=problemas_suministro_dcp_description)
     async def problemas_suministro_dcp(cod_dcp: str) -> dict[str, Any]:
-        """Presentaciones comercializadas + con problemas para un DCP (descripción clínica)."""
         result = await safe_cima_call(cima.psuministro_dcp, cod_dcp)
         return format_response(result, _build_metadata({"cod_dcp": cod_dcp}, API_PSUM_VERSION))
 
-    @server.tool()
+    @server.tool(description=problemas_suministro_dcpf_description)
     async def problemas_suministro_dcpf(cod_dcpf: str) -> dict[str, Any]:
-        """Presentaciones comercializadas + con problemas para un DCPF (con forma farmacéutica)."""
         result = await safe_cima_call(cima.psuministro_dcpf, cod_dcpf)
         return format_response(result, _build_metadata({"cod_dcpf": cod_dcpf}, API_PSUM_VERSION))
 
-    @server.tool()
+    @server.tool(description=listar_notas_description)
     async def listar_notas(nregistro: list[str]) -> dict[str, Any]:
-        """Notas de seguridad para uno o varios registros."""
         if not nregistro:
             return {"error": "Se requiere al menos un 'nregistro'."}
         coros = [safe_cima_call(cima.notas, nregistro=nr) for nr in nregistro]
@@ -258,9 +259,8 @@ def build_server() -> FastMCP:
                 data[nr] = resp
         return format_response({"notas": data, "errores": errors}, _build_metadata({"nregistro": nregistro}))
 
-    @server.tool()
+    @server.tool(description=listar_materiales_description)
     async def listar_materiales(nregistro: list[str]) -> dict[str, Any]:
-        """Materiales informativos para uno o varios registros."""
         if not nregistro:
             return {"error": "Se requiere al menos un 'nregistro'."}
         coros = [safe_cima_call(cima.materiales, nregistro=nr) for nr in nregistro]
@@ -271,13 +271,12 @@ def build_server() -> FastMCP:
     # ------------------------------------------------------------------
     # Documentos segmentados (FT, prospecto)
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(description=doc_secciones_description)
     async def doc_secciones(
         tipo_doc: int,
         nregistro: list[str] | None = None,
         cn: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Metadatos de secciones de FT (tipo_doc=1), prospecto (2), u otros (3-4)."""
         if not (nregistro or cn):
             return {"error": "Se requiere al menos un 'nregistro' o 'cn'."}
         results: list[dict[str, Any]] = []
@@ -300,7 +299,7 @@ def build_server() -> FastMCP:
             results, _build_metadata({"tipo_doc": tipo_doc, "cn": cn, "nregistro": nregistro})
         )
 
-    @server.tool()
+    @server.tool(description=doc_contenido_description)
     async def doc_contenido(
         tipo_doc: int,
         nregistro: str | None = None,
@@ -308,7 +307,6 @@ def build_server() -> FastMCP:
         seccion: str | None = None,
         format: str = "json",
     ) -> Any:
-        """Contenido de secciones (FT/prospecto). format=json|html|txt."""
         if not (nregistro or cn):
             return {"error": "Se requiere 'nregistro' o 'cn'."}
         nr_norm, cn_norm = await normalize_nregistro_and_cn(nregistro=nregistro, cn=cn)
@@ -330,15 +328,13 @@ def build_server() -> FastMCP:
             )
         return result
 
-    @server.tool()
+    @server.tool(description=html_ft_description)
     async def html_ficha_tecnica(nregistro: str, filename: str = "FichaTecnica.html") -> str:
-        """HTML completo de la ficha técnica de un medicamento."""
         data = await cima.get_html_bytes(tipo="ft", nregistro=nregistro, filename=filename)
         return data.decode("utf-8")
 
-    @server.tool()
+    @server.tool(description=html_p_description)
     async def html_prospecto(nregistro: str, filename: str = "Prospecto.html") -> str:
-        """HTML completo del prospecto de un medicamento."""
         data = await cima.get_html_bytes(tipo="p", nregistro=nregistro, filename=filename)
         return data.decode("utf-8")
 

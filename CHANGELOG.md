@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] — 2026-05-05
+
+### Changed
+- **MCP tool descriptions reescritas y unificadas** a partir de la
+  documentacion oficial CIMA REST API v1.23 y Problemas Suministro
+  v1.01. Cada herramienta ahora cita su endpoint upstream, sus
+  limitaciones (solo medicamentos autorizados en Espana) y un "cuando
+  usar" para que los LLMs disambiguen entre tools hermanas (p.ej.
+  `obtener_medicamento` vs `buscar_medicamentos`, `doc_contenido` vs
+  `html_ficha_tecnica`).
+- `mcp_constants.py` es ahora **single source of truth**: las
+  descripciones se inyectan tanto en stdio (`@server.tool(description=...)`)
+  como en HTTP (`@router.get(..., description=...)`), evitando drift
+  entre transports.
+- `MCP_AEMPS_SYSTEM_PROMPT` reorganizado por categorias (medicamento
+  concreto / presentaciones / catalogos / cambios y vigilancia /
+  problemas de suministro / documentos), con un flujo recomendado
+  paso a paso.
+- `doc_secciones`: el path param `tipo_doc` ahora documenta los 4
+  tipos oficiales (1=FT, 2=Prospecto, 3=IPE, 4=Plan Gestion Riesgos)
+  en lugar de "3-4 otros".
+
 ## [0.2.0] — 2026-05-05
 
 ### Added

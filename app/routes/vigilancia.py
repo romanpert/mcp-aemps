@@ -23,6 +23,16 @@ from app.helpers import (
     format_response,
     safe_cima_call,
 )
+from app.mcp_constants import (
+    listar_materiales_description,
+    listar_notas_description,
+    obtener_materiales_description,
+    obtener_notas_description,
+    problemas_suministro_dcp_description,
+    problemas_suministro_dcpf_description,
+    problemas_suministro_description,
+    registro_cambios_description,
+)
 from app.rate_limits import limit_heavy, limit_standard
 
 logger = logging.getLogger("mcp.aemps")
@@ -50,6 +60,7 @@ CAMBIOS_MAP = {
     "/registro-cambios",
     operation_id="registro_cambios",
     summary="Historial de altas, bajas y modificaciones de medicamentos",
+    description=registro_cambios_description,
     response_model=Dict[str, Any],
     dependencies=[limit_standard],
 )
@@ -97,6 +108,7 @@ async def registro_cambios(
     "/problemas-suministro",
     operation_id="problemas_suministro",
     summary="Problemas de suministro: global paginado o detalle por CN (v2 con fallback v1)",
+    description=problemas_suministro_description,
     response_model=Dict[str, Any],
     dependencies=[limit_heavy],
 )
@@ -184,6 +196,7 @@ async def problemas_suministro(
     "/problemas-suministro/dcp/{cod_dcp}",
     operation_id="problemas_suministro_dcp",
     summary="Presentaciones comercializadas y con problemas de suministro para un DCP",
+    description=problemas_suministro_dcp_description,
     response_model=Dict[str, Any],
     dependencies=[limit_standard],
 )
@@ -205,6 +218,7 @@ async def problemas_suministro_dcp(
     "/problemas-suministro/dcpf/{cod_dcpf}",
     operation_id="problemas_suministro_dcpf",
     summary="Presentaciones comercializadas y con problemas de suministro para un DCPF",
+    description=problemas_suministro_dcpf_description,
     response_model=Dict[str, Any],
     dependencies=[limit_standard],
 )
@@ -242,6 +256,7 @@ async def _fetch_notas_batch(registros: List[str]) -> tuple[Dict[str, Any], Dict
     "/notas",
     operation_id="listar_notas",
     summary="Notas de seguridad para uno o varios registros",
+    description=listar_notas_description,
     response_model=Dict[str, Any],
     dependencies=[limit_heavy],
 )
@@ -265,6 +280,7 @@ async def listar_notas(
     "/notas/{nregistros}",
     operation_id="obtener_notas",
     summary="Detalle de notas de seguridad de uno o varios registros",
+    description=obtener_notas_description,
     response_model=Dict[str, Any],
     dependencies=[limit_heavy],
 )
@@ -297,6 +313,7 @@ async def obtener_notas(
     "/materiales",
     operation_id="listar_materiales",
     summary="Materiales informativos para uno o varios registros",
+    description=listar_materiales_description,
     response_model=Dict[str, Any],
     dependencies=[limit_heavy],
 )
@@ -323,6 +340,7 @@ async def listar_materiales(
     "/materiales/{nregistro}",
     operation_id="obtener_materiales",
     summary="Materiales informativos de un registro",
+    description=obtener_materiales_description,
     response_model=Dict[str, Any],
     dependencies=[limit_standard],
 )
