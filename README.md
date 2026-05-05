@@ -33,7 +33,7 @@
 # pip
 pip install mcp-aemps
 
-# zero-install
+# zero-install (recommended for CLI clients)
 uvx mcp-aemps up
 pipx run mcp-aemps up
 
@@ -46,25 +46,48 @@ docker compose up -d
 
 ---
 
-## Connect to Claude Desktop
+## One-command client setup
 
-Add to `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "aemps": {
-      "url": "http://localhost:8000/mcp"
-    }
-  }
-}
-```
-
-Then start the server:
+After `pip install mcp-aemps`, register the server with your MCP client in
+**one command** — no manual JSON editing.
 
 ```bash
-mcp_aemps up
+# All detected clients at once
+mcp-aemps install
+
+# Or pick one
+mcp-aemps install claude-desktop
+mcp-aemps install claude-code
+mcp-aemps install codex
+
+# Custom URL or server key
+mcp-aemps install --url http://my-host:9000/mcp --name aemps
 ```
+
+To remove:
+
+```bash
+mcp-aemps uninstall                  # remove from all
+mcp-aemps uninstall claude-desktop   # one client only
+```
+
+The installer is **idempotent** — running it twice is safe — and **preserves
+existing entries** in your client config. It edits the right file per OS:
+
+| Client | macOS | Windows | Linux |
+|---|---|---|---|
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` | `%APPDATA%\Claude\claude_desktop_config.json` | `~/.config/Claude/claude_desktop_config.json` |
+| Claude Code | `claude mcp add` (preferred) → fallback `~/.claude.json` | same | same |
+| Codex | `~/.codex/config.toml` | `%USERPROFILE%\.codex\config.toml` | `~/.codex/config.toml` |
+
+After install, **start the server** (in another terminal or as a background daemon):
+
+```bash
+mcp-aemps up           # foreground
+mcp-aemps up --daemon  # background
+```
+
+Then restart your client. `mcp-aemps` will appear as an available MCP server.
 
 ---
 

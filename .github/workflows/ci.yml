@@ -39,28 +39,13 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
-      - name: Install package
+      - name: Install package + test deps
         run: |
           pip install --upgrade pip
           pip install -e .
-      - name: Smoke test — import and instantiate
-        run: |
-          python -c "
-          from app.factory import create_app
-          from fastapi.testclient import TestClient
-          app = create_app(mount_mcp=False)
-          with TestClient(app) as c:
-              r = c.get('/health')
-              assert r.status_code == 200, r.text
-              body = r.json()
-              assert body['status'] == 'ok'
-              assert body['cache'] == 'in-memory'
-              assert body['version']
-              spec = c.get('/openapi.json').json()
-              assert len(spec['paths']) > 15
-              print('Health:', body)
-              print('Endpoints:', len(spec['paths']))
-          "
+          pip install pytest pytest-asyncio
+      - name: Run pytest
+        run: pytest tests/ -v
 
   build:
     name: Build wheel & sdist

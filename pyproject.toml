@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [project]
 name = "mcp-aemps"
-version = "0.1.1"
+version = "0.1.2"
 description = "Open-source MCP server for the Spanish AEMPS CIMA pharmaceutical registry"
 authors = [
   { name = "Román Pérez Dumpert", email = "roman.p98@gmail.com" }
@@ -53,7 +53,6 @@ Documentation = "https://github.com/romanpert/mcp-aemps#readme"
 Changelog = "https://github.com/romanpert/mcp-aemps/blob/master/CHANGELOG.md"
 
 [project.scripts]
-mcp_aemps = "app.cli:cli"
 mcp-aemps = "app.cli:cli"
 
 [tool.poetry]
@@ -69,7 +68,7 @@ exclude = [
 [tool.ruff]
 line-length = 110
 target-version = "py311"
-extend-exclude = [".venv", "venv", "dist", "build"]
+extend-exclude = [".venv", "venv", "dist", "build", "*.ipynb", "notebooks", "tests/data", "tests/downloads_notebook", "tests/imagenes_extraidas"]
 
 [tool.ruff.lint]
 # Conservative ruleset — no aggressive rewrites for v0.1.x baseline.
