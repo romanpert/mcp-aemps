@@ -1,9 +1,9 @@
 # app/logging_setup.py
 """Logging configuration — plain structured stdlib logging.
 
-Community Edition: console + rotating file handler with gzip compression.
-No OTel coupling. Enterprise editions add OTel correlation by replacing
-the formatter through a startup hook.
+Console + rotating file handler with gzip compression. No OTel coupling
+by default; downstream consumers can replace the formatter via a startup
+hook to add trace/correlation IDs.
 """
 
 from __future__ import annotations

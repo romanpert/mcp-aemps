@@ -6,13 +6,15 @@ write succeeds fully or not at all), and additive (preserves existing entries
 in the user's config).
 
 Supported clients:
-- Claude Desktop  (via mcp-remote bridge — the only format Claude Desktop's
-                   config file currently validates for HTTP MCP servers)
+- Claude Desktop  (stdio default; mcp-remote HTTP bridge as fallback)
 - Claude Code     (`claude mcp add` CLI preferred, fallback to ~/.claude.json)
 - Codex CLI       (~/.codex/config.toml)
-- VS Code         (settings.json mcp.servers OR per-workspace .vscode/mcp.json)
+- VS Code         (settings.json mcp.servers — used by Copilot Chat MCP)
 - Cursor          (~/.cursor/mcp.json)
 - Windsurf        (~/.codeium/windsurf/mcp_config.json)
+- Zed             (settings.json context_servers)
+- Continue.dev    (~/.continue/config.yaml mcpServers block)
+- JetBrains Junie (~/.junie/mcp.json — standard MCP JSON schema)
 """
 
 from __future__ import annotations
@@ -317,6 +319,40 @@ def install_codex(
     return InstallResult("Codex CLI", path, action, f"{server_key} -> {url}")
 
 
+def uninstall_codex(
+    *, server_key: str = SERVER_KEY, config_path: Path | None = None
+) -> InstallResult:
+    """Remove the [mcp_servers.<server_key>] block from ~/.codex/config.toml."""
+    path = config_path or codex_config_path()
+    if not path.exists():
+        return InstallResult("Codex CLI", path, "unchanged", f"{server_key} was not present")
+
+    text = path.read_text(encoding="utf-8")
+    header = f"[mcp_servers.{server_key}]"
+    if header not in text:
+        return InstallResult("Codex CLI", path, "unchanged", f"{server_key} was not present")
+
+    lines = text.splitlines(keepends=True)
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        if lines[i].strip() == header:
+            i += 1
+            while i < len(lines) and not lines[i].lstrip().startswith("["):
+                i += 1
+            # also drop a trailing blank line if any
+            while out and out[-1].strip() == "":
+                out.pop()
+            if out:
+                out.append("\n")
+            continue
+        out.append(lines[i])
+        i += 1
+    new_text = "".join(out).lstrip("\n")
+    path.write_text(new_text, encoding="utf-8")
+    return InstallResult("Codex CLI", path, "removed", f"{server_key} removed")
+
+
 # ---------------------------------------------------------------------------
 # VS Code (user settings.json)
 # ---------------------------------------------------------------------------
@@ -460,6 +496,206 @@ def uninstall_windsurf(*, server_key: str = SERVER_KEY, config_path: Path | None
 
 
 # ---------------------------------------------------------------------------
+# Zed
+# ---------------------------------------------------------------------------
+def zed_settings_path() -> Path:
+    if sys.platform == "darwin":
+        return Path.home() / ".config" / "zed" / "settings.json"
+    if sys.platform.startswith("win"):
+        appdata = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+        return Path(appdata) / "Zed" / "settings.json"
+    xdg = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(xdg) / "zed" / "settings.json"
+
+
+def install_zed(
+    *,
+    url: str | None = None,
+    server_key: str = SERVER_KEY,
+    config_path: Path | None = None,
+) -> InstallResult:
+    """Add to Zed's user settings under ``context_servers.<name>``.
+
+    Zed exposes MCP servers to its inline assistant via the
+    ``context_servers`` setting. HTTP servers use ``url``; stdio servers use
+    ``command``/``args``. We default to HTTP so the same long-running
+    ``mcp-aemps up`` instance can serve multiple editors.
+    """
+    url = url or _default_url()
+    path = config_path or zed_settings_path()
+    config = _read_json(path)
+
+    desired = {"url": url}
+    existing = _get_nested(config, ["context_servers", server_key])
+
+    if existing == desired:
+        return InstallResult("Zed", path, "unchanged", f"{server_key} already configured")
+
+    action = "updated" if existing else "added"
+    _set_nested(config, ["context_servers", server_key], desired)
+    _atomic_write_json(path, config)
+    return InstallResult("Zed", path, action, f"{server_key} -> {url}; restart Zed")
+
+
+def uninstall_zed(*, server_key: str = SERVER_KEY, config_path: Path | None = None) -> InstallResult:
+    path = config_path or zed_settings_path()
+    config = _read_json(path)
+    if _delete_nested(config, ["context_servers", server_key]):
+        _atomic_write_json(path, config)
+        return InstallResult("Zed", path, "removed", f"{server_key} removed")
+    return InstallResult("Zed", path, "unchanged", f"{server_key} was not present")
+
+
+# ---------------------------------------------------------------------------
+# Continue.dev
+# ---------------------------------------------------------------------------
+def continue_config_path() -> Path:
+    return Path.home() / ".continue" / "config.yaml"
+
+
+_CONTINUE_BLOCK_HEADER = "# --- mcp-aemps (managed by `mcp-aemps install continue`) ---"
+_CONTINUE_BLOCK_FOOTER = "# --- end mcp-aemps ---"
+
+
+def _build_continue_block(server_key: str, url: str) -> str:
+    return (
+        f"{_CONTINUE_BLOCK_HEADER}\n"
+        f"mcpServers:\n"
+        f"  - name: {server_key}\n"
+        f"    transport:\n"
+        f"      type: http\n"
+        f"      url: {url}\n"
+        f"{_CONTINUE_BLOCK_FOOTER}\n"
+    )
+
+
+def install_continue(
+    *,
+    url: str | None = None,
+    server_key: str = SERVER_KEY,
+    config_path: Path | None = None,
+) -> InstallResult:
+    """Append a managed mcp-aemps block to ~/.continue/config.yaml.
+
+    Continue.dev (VS Code & JetBrains extension) reads ``mcpServers`` from
+    its YAML config. We avoid pulling PyYAML as a dependency by writing the
+    block as plain text, fenced with sentinel comments so subsequent runs
+    can replace exactly our block without disturbing the user's other
+    settings.
+    """
+    url = url or _default_url()
+    path = config_path or continue_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing_text = path.read_text(encoding="utf-8") if path.exists() else ""
+
+    block = _build_continue_block(server_key, url)
+
+    if _CONTINUE_BLOCK_HEADER in existing_text:
+        # Replace the existing managed block in place.
+        before, _, rest = existing_text.partition(_CONTINUE_BLOCK_HEADER)
+        _, _, after = rest.partition(_CONTINUE_BLOCK_FOOTER)
+        new_text = before.rstrip() + ("\n\n" if before.strip() else "") + block + after.lstrip("\n")
+        action = "updated" if existing_text.strip() != new_text.strip() else "unchanged"
+    else:
+        sep = "\n\n" if existing_text.strip() else ""
+        new_text = existing_text.rstrip("\n") + sep + block
+        action = "added"
+
+    if new_text == existing_text:
+        return InstallResult("Continue.dev", path, "unchanged", f"{server_key} already configured")
+
+    path.write_text(new_text, encoding="utf-8")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    return InstallResult("Continue.dev", path, action, f"{server_key} -> {url}; restart your IDE")
+
+
+def uninstall_continue(
+    *, server_key: str = SERVER_KEY, config_path: Path | None = None
+) -> InstallResult:
+    path = config_path or continue_config_path()
+    if not path.exists():
+        return InstallResult("Continue.dev", path, "unchanged", f"{server_key} was not present")
+
+    text = path.read_text(encoding="utf-8")
+    if _CONTINUE_BLOCK_HEADER not in text:
+        return InstallResult("Continue.dev", path, "unchanged", f"{server_key} was not present")
+
+    before, _, rest = text.partition(_CONTINUE_BLOCK_HEADER)
+    _, _, after = rest.partition(_CONTINUE_BLOCK_FOOTER)
+    new_text = (before.rstrip("\n") + "\n" + after.lstrip("\n")).rstrip("\n") + "\n"
+    if not new_text.strip():
+        new_text = ""
+    path.write_text(new_text, encoding="utf-8")
+    return InstallResult("Continue.dev", path, "removed", f"{server_key} removed")
+
+
+# ---------------------------------------------------------------------------
+# JetBrains Junie / AI Assistant
+# ---------------------------------------------------------------------------
+def jetbrains_config_path() -> Path:
+    """JetBrains Junie reads ~/.junie/mcp.json (standard MCP JSON schema).
+
+    AI Assistant in JetBrains 2025.x stores MCP servers in per-IDE XML
+    files (``<config-dir>/options/mcp-server.xml``); editing those is
+    fragile across IDE versions, so we target Junie's stable JSON path
+    and surface a hint to use the Settings UI for AI Assistant.
+    """
+    return Path.home() / ".junie" / "mcp.json"
+
+
+def install_jetbrains(
+    *,
+    url: str | None = None,
+    server_key: str = SERVER_KEY,
+    config_path: Path | None = None,
+) -> InstallResult:
+    """Add to JetBrains Junie's MCP config (~/.junie/mcp.json).
+
+    For the classic AI Assistant plugin (not Junie), configure manually:
+    Settings → Tools → AI Assistant → MCP servers → add HTTP server.
+    """
+    url = url or _default_url()
+    path = config_path or jetbrains_config_path()
+    config = _read_json(path)
+    config.setdefault("mcpServers", {})
+
+    desired: dict[str, Any] = {"type": "http", "url": url}
+    existing = config["mcpServers"].get(server_key)
+
+    if existing == desired:
+        return InstallResult(
+            "JetBrains Junie", path, "unchanged", f"{server_key} already configured"
+        )
+
+    action = "updated" if existing else "added"
+    config["mcpServers"][server_key] = desired
+    _atomic_write_json(path, config)
+    return InstallResult(
+        "JetBrains Junie",
+        path,
+        action,
+        f"{server_key} -> {url}; restart your JetBrains IDE "
+        "(AI Assistant users: configure via Settings -> Tools -> AI Assistant -> MCP servers)",
+    )
+
+
+def uninstall_jetbrains(
+    *, server_key: str = SERVER_KEY, config_path: Path | None = None
+) -> InstallResult:
+    path = config_path or jetbrains_config_path()
+    config = _read_json(path)
+    servers = config.get("mcpServers", {})
+    if server_key in servers:
+        del servers[server_key]
+        _atomic_write_json(path, config)
+        return InstallResult("JetBrains Junie", path, "removed", f"{server_key} removed")
+    return InstallResult("JetBrains Junie", path, "unchanged", f"{server_key} was not present")
+
+
+# ---------------------------------------------------------------------------
 # Registry — used by the `mcp-aemps install` (no subcommand) "all" path
 # ---------------------------------------------------------------------------
 ALL_INSTALLERS = {
@@ -469,12 +705,19 @@ ALL_INSTALLERS = {
     "vscode": install_vscode,
     "cursor": install_cursor,
     "windsurf": install_windsurf,
+    "zed": install_zed,
+    "continue": install_continue,
+    "jetbrains": install_jetbrains,
 }
 
 ALL_UNINSTALLERS = {
     "claude-desktop": uninstall_claude_desktop,
     "claude-code": uninstall_claude_code,
+    "codex": uninstall_codex,
     "vscode": uninstall_vscode,
     "cursor": uninstall_cursor,
     "windsurf": uninstall_windsurf,
+    "zed": uninstall_zed,
+    "continue": uninstall_continue,
+    "jetbrains": uninstall_jetbrains,
 }

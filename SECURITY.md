@@ -4,8 +4,8 @@
 
 | Version | Supported |
 |---|---|
-| 0.1.x | ✅ |
-| < 0.1 | ❌ |
+| 0.2.x | ✅ |
+| < 0.2 | ❌ |
 
 ## Reporting a vulnerability
 
@@ -79,5 +79,6 @@ These limits are **courtesy defaults**, not AEMPS-mandated thresholds.
 - [ ] Provide `REDIS_URL` for distributed rate limiting and cache (multi-replica)
 - [ ] Set `LOG_LEVEL=INFO` (not DEBUG) and ship logs to a SIEM
 - [ ] Use the Docker image with the non-root user (`UID 10001`)
-- [ ] Enable OTel export by deploying the **Enterprise Edition** if you need
-      distributed tracing (the Community Edition does not bundle OTel)
+- [ ] If you need distributed tracing, plug an OTel exporter via the
+      factory's `extra_middleware` / `startup_hooks` extension points
+      (the default build does not bundle OTel — keep deps minimal).

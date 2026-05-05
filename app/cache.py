@@ -1,12 +1,14 @@
 # app/cache.py
 """Cache backend abstraction.
 
-Community Edition: in-memory TTL cache (cachetools), zero infra required.
-Enterprise Edition: same interface, Redis-backed when REDIS_URL is configured.
+Two backends behind one interface:
+- in-memory TTL cache (``cachetools``) — zero infra required, default.
+- Redis (or any Redis-compatible store like Valkey) when ``REDIS_URL`` is set
+  and reachable.
 
-The selection is automatic — if REDIS_URL is set and reachable, Redis is used;
-otherwise the server falls back to in-memory and continues working with no
-external dependencies.
+The selection is automatic. If ``REDIS_URL`` is configured but the server
+cannot reach it at startup, we log a warning and fall back to in-memory so
+the process keeps serving traffic.
 """
 
 from __future__ import annotations
@@ -36,19 +38,21 @@ class CacheBackend(Protocol):
 
 
 class InMemoryCache:
-    """Async wrapper over cachetools.TTLCache. Pure Python, no infra."""
+    """Async wrapper over cachetools.TTLCache. Pure Python, no infra.
+
+    No lock needed: ``TTLCache`` operations are O(1) and safe in a single
+    asyncio loop because the wrapper methods do not await between read and
+    write. A lock would only add contention.
+    """
 
     def __init__(self, maxsize: int = _DEFAULT_MAXSIZE, ttl: int = MAESTRAS_TTL_SECONDS):
         self._store: TTLCache = TTLCache(maxsize=maxsize, ttl=ttl)
-        self._lock = asyncio.Lock()
 
     async def get(self, key: str) -> Any:
-        async with self._lock:
-            return self._store.get(key)
+        return self._store.get(key)
 
     async def set(self, key: str, value: Any, ttl: int) -> None:
-        async with self._lock:
-            self._store[key] = value
+        self._store[key] = value
 
     async def close(self) -> None:
         return None

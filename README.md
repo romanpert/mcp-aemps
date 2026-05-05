@@ -59,12 +59,15 @@ After `pip install mcp-aemps`, register the server with your MCP client in
 mcp-aemps install
 
 # Or pick one
-mcp-aemps install claude-desktop   # uses npx mcp-remote bridge (works today)
+mcp-aemps install claude-desktop   # stdio default (uvx auto-launch); HTTP via mcp-remote optional
 mcp-aemps install claude-code      # uses `claude mcp add` if available
 mcp-aemps install codex
-mcp-aemps install vscode           # writes mcp.servers in user settings.json
+mcp-aemps install vscode           # writes mcp.servers in user settings.json (Copilot Chat MCP)
 mcp-aemps install cursor           # writes ~/.cursor/mcp.json
 mcp-aemps install windsurf         # writes ~/.codeium/windsurf/mcp_config.json
+mcp-aemps install zed              # writes context_servers in Zed settings.json
+mcp-aemps install continue         # writes mcpServers in ~/.continue/config.yaml
+mcp-aemps install jetbrains        # writes ~/.junie/mcp.json (JetBrains Junie)
 
 # Custom URL or server key
 mcp-aemps install --url http://my-host:9000/mcp --name aemps
@@ -92,6 +95,9 @@ change ports without re-installing).
 | VS Code | `~/Library/Application Support/Code/User/settings.json` | `%APPDATA%\Code\User\settings.json` | `~/.config/Code/User/settings.json` |
 | Cursor | `~/.cursor/mcp.json` | same | same |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | same | same |
+| Zed | `~/.config/zed/settings.json` | `%APPDATA%\Zed\settings.json` | `~/.config/zed/settings.json` |
+| Continue.dev | `~/.continue/config.yaml` | same | same |
+| JetBrains Junie | `~/.junie/mcp.json` | same | same |
 
 After install, **start the server** (default port: **`8765`** — chosen to avoid
 collisions with the very common `8000`/`5000`/`3000`):
@@ -150,27 +156,35 @@ All settings via environment variables:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `8765` | Server port (`mcp-aemps up --auto-port` finds free if busy) |
-| `REDIS_URL` | — | Redis connection (optional, enables caching) |
-| `ALLOWED_ORIGINS` | `http://localhost:3000` | CORS origins |
-| `METRICS_KEY` | — | Auth key for `/internal/metrics` |
+| `REDIS_URL` | — | Redis or Valkey connection (optional, enables distributed cache + rate limit) |
+| `ALLOWED_ORIGINS` | `http://localhost:3000` | CORS origins (do not use `*` in production) |
+| `METRICS_KEY` | — | If set, `/internal/metrics` requires the `X-Metrics-Key` header. Recommended in production. |
 | `LOG_LEVEL` | `INFO` | Logging level |
-| `RATE_LIMIT` | `100` | Requests per period |
-| `RATE_PERIOD` | `60` | Period in seconds |
+| `LOG_RETENTION_DAYS` | `90` | Daily-rotated gzipped log retention |
+| `MAX_RESULTS` | `30` | Max items per page returned by list endpoints |
 
 ---
 
 ## Observability
 
-Community Edition ships with **lightweight in-process observability** —
-no external collector required:
+Ships with **lightweight in-process observability** — no external collector
+required:
 
-- **Health check** at `/health` — `{status, version, cache}` JSON snapshot
+- **Liveness** at `/health/live` — process is alive (always 200 if the
+  event loop responds).
+- **Readiness** at `/health/ready` — cache backend reachable AND maestras
+  warmup completed (returns 503 during startup). Wire this into
+  Kubernetes `readinessProbe`.
+- **Combined snapshot** at `/health` — `{status, version, cache}` JSON
+  (kept for backwards compatibility).
 - **In-process metrics** at `/internal/metrics` — `{requests_total,
-  requests_by_path, status_codes, errors_5xx, uptime_seconds}` JSON
+  requests_by_path, status_codes, errors_5xx, uptime_seconds}` JSON.
+  Set `METRICS_KEY` to require the `X-Metrics-Key` header.
 - **Structured stdlib logging** with daily rotation + gzip retention
 
-For OpenTelemetry tracing, Prometheus exposition, distributed log
-correlation, or audit-grade event streams, use the **Enterprise edition**.
+For OpenTelemetry tracing or Prometheus exposition, replace the metrics
+middleware via the factory's `extra_middleware` / `startup_hooks` extension
+points (see `app/factory.py`).
 
 ---
 
@@ -190,16 +204,6 @@ Official AEMPS source documents in [`docs/`](docs/):
 
 - [`CIMA_REST_API.pdf`](docs/CIMA_REST_API.pdf) — CIMA REST API v1.23
 - [`CIMA-problemas-suministro.pdf`](docs/CIMA-problemas-suministro.pdf) — Supply Problems API (AEMPS/Ministerio de Sanidad)
-
----
-
-## Full Version
-
-This is the open-source **Community Edition**. A **Full Edition** is available with extended capabilities for enterprise and regulated environments.
-
-For licensing, integration support, or custom deployments:
-
-**roman.p98@gmail.com**
 
 ---
 

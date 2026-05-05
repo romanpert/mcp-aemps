@@ -2,7 +2,8 @@
 """Lightweight in-process metrics — zero external dependencies.
 
 Returns a JSON snapshot of in-process counters and basic system info.
-For Prometheus-style metrics + OTel export, use the Enterprise edition.
+Replace via ``create_app(extra_middleware=...)`` when you need Prometheus
+exposition or OTel export.
 
 This is enough for:
 - Verifying the server is alive and serving traffic

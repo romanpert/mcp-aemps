@@ -101,10 +101,10 @@ and MCP Registry submission (github-oidc) — no manual tokens involved.
 ### Architectural rules
 
 - **Thin routes**: route handlers (`app/routes/*.py`) delegate to `cima_client` + `helpers`. No business logic in route bodies.
-- **Factory-only app instantiation**: never create a `FastAPI()` instance directly outside `app/factory.py`. Enterprise editions extend via `create_app(extra_routers=..., extra_middleware=..., startup_hooks=...)`.
+- **Factory-only app instantiation**: never create a `FastAPI()` instance directly outside `app/factory.py`. Downstream consumers extend via `create_app(extra_routers=..., extra_middleware=..., startup_hooks=...)`.
 - **Optional Redis**: code must work without Redis. If you add a Redis-dependent feature, gate it behind `if settings.redis_url`.
 - **No PII logging**: CIMA returns medicine metadata only. Don't add anything that correlates queries to user identity.
-- **Official CIMA endpoints only**: any new MCP tool must map 1:1 to a documented CIMA endpoint. No proprietary/custom endpoints in the Community Edition.
+- **Official CIMA endpoints only**: any new MCP tool must map 1:1 to a documented CIMA endpoint. No proprietary/custom endpoints belong in this repository.
 
 ### Tests
 

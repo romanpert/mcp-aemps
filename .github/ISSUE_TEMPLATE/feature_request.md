@@ -18,10 +18,6 @@ assignees: romanpert
 - Documented in: `docs/CIMA_REST_API.pdf` § X.Y / `docs/CIMA-problemas-suministro.pdf` § X.Y
 - Upstream URL: `https://cima.aemps.es/cima/rest/...`
 
-## Edition
-- [ ] Community (must map to official CIMA endpoint)
-- [ ] Enterprise (private edition; open separate request to roman.p98@gmail.com)
-
 ## Acceptance criteria
 - [ ] ...
 - [ ] ...
