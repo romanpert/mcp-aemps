@@ -52,7 +52,17 @@ graphify-out/
 GRAPH_REPORT.md
 
 # ── Tests ────────────────────────────────────────────────────────────────────
-tests/**
+.pytest_cache/
+.coverage
+htmlcov/
+tests/__pycache__/
+tests/data/
+tests/downloads_notebook/
+tests/imagenes_extraidas/
+
+# ── Notebooks (dev exploration, not part of package) ─────────────────────────
+*.ipynb
+notebooks/
 
 # ── Data runtime (descargas en tiempo de ejecucion, no rastrear) ─────────────
 data/

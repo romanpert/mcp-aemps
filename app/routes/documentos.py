@@ -8,7 +8,8 @@ import logging
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Response, Path as FPath
+from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import Path as FPath
 from fastapi.responses import HTMLResponse
 from httpx import HTTPStatusError
 

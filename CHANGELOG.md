@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] — 2026-05-05
+
+### Added
+- **One-command client install** — `mcp-aemps install [claude-desktop|claude-code|codex]`
+  auto-configures the server in any MCP-compatible client. Idempotent, preserves
+  existing entries in the user's config. Per-OS path resolution.
+- `mcp-aemps uninstall` to remove the server cleanly from clients.
+- Test suite: 14 hermetic tests covering installers and end-to-end factory boot
+  (Claude Desktop, Claude Code, Codex, lifespan hooks, extra routers).
+- `CONTRIBUTING.md` with GitFlow workflow, conventional-commit standards, and
+  PR/issue templates.
+- `SECURITY.md` with threat model, self-imposed rate-limit policy, and hardening
+  checklist for production.
+
+### Changed
+- CLI script renamed: `mcp_aemps` → `mcp-aemps` (single canonical command).
+  Underscore alias removed.
+- CI pipeline now runs the full pytest suite on Python 3.11/3.12/3.13 instead of
+  an inline smoke test.
+- Lint baseline is clean (ruff, 0 findings).
+
+## [0.1.1] — 2026-05-05
+
+### Added
+- README ownership marker (`mcp-name: io.github.romanpert/mcp-aemps`) required
+  by the official MCP Registry to validate PyPI package ownership.
+
 ## [0.1.0] — 2026-05-05
 
 First public release.
@@ -36,4 +63,6 @@ First public release.
   `Permissions-Policy`.
 - No PII processed: CIMA exposes medicine metadata only.
 
+[0.1.2]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.1.2
+[0.1.1]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.1.1
 [0.1.0]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.1.0

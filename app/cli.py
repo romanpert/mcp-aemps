@@ -20,21 +20,22 @@ En `app/mcp_aemps.json` se diferencian:
 """
 from __future__ import annotations
 
-import os
-import sys
-import subprocess
-import webbrowser
 import json
+import os
 import socket
+import subprocess
+import sys
+import webbrowser
 from pathlib import Path
 from typing import Optional, Tuple
 
+import httpx
 import typer
 import uvicorn
-import httpx
+from rich.align import Align
 from rich.console import Console
 from rich.panel import Panel
-from rich.align import Align
+
 from app.config import settings
 
 console = Console()
@@ -297,7 +298,7 @@ def down():
 def status():
     """Comprueba si el servidor está en marcha."""
     if not PID_FILE.exists():
-        console.print(f"❌  No hay servidor en ejecución.", style="red")
+        console.print("❌  No hay servidor en ejecución.", style="red")
         raise typer.Exit(code=1)
     pid = int(PID_FILE.read_text())
     try:
@@ -430,6 +431,113 @@ def docs(
     except Exception as e:
         console.print(f"❌  No se pudo abrir el navegador: {e}", style="red")
         raise typer.Exit(code=1)
+
+
+# ---------------------------------------------------------------------------
+# install / uninstall — auto-config MCP-compatible clients
+# ---------------------------------------------------------------------------
+install_app = typer.Typer(
+    add_completion=False,
+    help="Auto-configure mcp-aemps in MCP-compatible clients (Claude Desktop, Claude Code, Codex).",
+    invoke_without_command=True,
+)
+uninstall_app = typer.Typer(
+    add_completion=False,
+    help="Remove mcp-aemps entry from MCP-compatible clients.",
+    invoke_without_command=True,
+)
+cli.add_typer(install_app, name="install")
+cli.add_typer(uninstall_app, name="uninstall")
+
+
+def _print_install_result(res) -> None:
+    icon = {"added": "✅", "updated": "🔄", "unchanged": "ℹ️", "removed": "🗑️"}.get(res.action, "•")
+    console.print(f"{icon}  [bold]{res.client}[/]  ({res.action}) — {res.message}")
+    console.print(f"    [dim]config: {res.config_path}[/dim]")
+
+
+@install_app.callback(invoke_without_command=True)
+def _install_main(
+    ctx: typer.Context,
+    url: str = typer.Option("http://localhost:8000/mcp", "--url", help="MCP endpoint URL"),
+    name: str = typer.Option("mcp-aemps", "--name", help="Server key in client config"),
+):
+    """Install in ALL detected clients (default when no subcommand)."""
+    if ctx.invoked_subcommand is not None:
+        return
+    from app.installers import install_claude_code, install_claude_desktop, install_codex
+
+    console.print(f"🔌  Installing [bold]mcp-aemps[/] (key=[cyan]{name}[/], url=[cyan]{url}[/])\n")
+    for installer in (install_claude_desktop, install_claude_code, install_codex):
+        try:
+            res = installer(url=url, server_key=name)
+            _print_install_result(res)
+        except Exception as exc:
+            console.print(f"❌  {installer.__name__}: {type(exc).__name__}: {exc}", style="red")
+    console.print("\n[dim]Restart the affected clients to pick up the change.[/dim]")
+
+
+@install_app.command("claude-desktop")
+def _install_claude_desktop(
+    url: str = typer.Option("http://localhost:8000/mcp", "--url"),
+    name: str = typer.Option("mcp-aemps", "--name"),
+):
+    """Install in Claude Desktop only."""
+    from app.installers import install_claude_desktop
+    _print_install_result(install_claude_desktop(url=url, server_key=name))
+
+
+@install_app.command("claude-code")
+def _install_claude_code(
+    url: str = typer.Option("http://localhost:8000/mcp", "--url"),
+    name: str = typer.Option("mcp-aemps", "--name"),
+    scope: str = typer.Option("user", "--scope", help="Claude Code scope: user | project | local"),
+):
+    """Install in Claude Code only (uses `claude mcp add` if available)."""
+    from app.installers import install_claude_code
+    _print_install_result(install_claude_code(url=url, server_key=name, scope=scope))
+
+
+@install_app.command("codex")
+def _install_codex(
+    url: str = typer.Option("http://localhost:8000/mcp", "--url"),
+    name: str = typer.Option("mcp-aemps", "--name"),
+):
+    """Install in OpenAI Codex CLI only."""
+    from app.installers import install_codex
+    _print_install_result(install_codex(url=url, server_key=name))
+
+
+@uninstall_app.callback(invoke_without_command=True)
+def _uninstall_main(
+    ctx: typer.Context,
+    name: str = typer.Option("mcp-aemps", "--name", help="Server key to remove"),
+):
+    """Uninstall from ALL detected clients (default when no subcommand)."""
+    if ctx.invoked_subcommand is not None:
+        return
+    from app.installers import uninstall_claude_code, uninstall_claude_desktop
+
+    console.print(f"🧹  Removing [bold]{name}[/] from MCP clients\n")
+    for u in (uninstall_claude_desktop, uninstall_claude_code):
+        try:
+            _print_install_result(u(server_key=name))
+        except Exception as exc:
+            console.print(f"❌  {u.__name__}: {type(exc).__name__}: {exc}", style="red")
+
+
+@uninstall_app.command("claude-desktop")
+def _uninstall_claude_desktop(name: str = typer.Option("mcp-aemps", "--name")):
+    """Remove from Claude Desktop only."""
+    from app.installers import uninstall_claude_desktop
+    _print_install_result(uninstall_claude_desktop(server_key=name))
+
+
+@uninstall_app.command("claude-code")
+def _uninstall_claude_code(name: str = typer.Option("mcp-aemps", "--name")):
+    """Remove from Claude Code only."""
+    from app.installers import uninstall_claude_code
+    _print_install_result(uninstall_claude_code(server_key=name))
 
 
 if __name__ == "__main__":
