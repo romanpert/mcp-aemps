@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] — 2026-05-05
+
+### Added
+- **Three new client installers**: `mcp-aemps install zed`,
+  `mcp-aemps install continue` (Continue.dev), and
+  `mcp-aemps install jetbrains` (JetBrains Junie). All idempotent +
+  atomic + per-OS path resolution. Installer registry test enforces
+  install/uninstall symmetry from now on.
+- **`uninstall_codex`** to close the install/uninstall asymmetry.
+- **`/health/live`** (liveness — always 200 if the event loop is
+  responsive) and **`/health/ready`** (readiness — 503 until cache
+  backend ok and maestras warmup finished). `/health` kept as a
+  backwards-compatible snapshot. Wire `/health/ready` into Kubernetes
+  `readinessProbe`.
+- **`METRICS_KEY` enforcement** on `/internal/metrics`: when set, the
+  endpoint requires a matching `X-Metrics-Key` header (401 otherwise).
+  When unset, the server logs a warning at startup so production
+  deployments do not silently expose counters.
+
+### Changed
+- `InMemoryCache` no longer wraps `cachetools.TTLCache` in an
+  `asyncio.Lock`. The wrapper does not await between read and write,
+  so the lock only added contention. Behaviour identical, fewer
+  context switches on hot paths.
+- Documentation cleanup: removed all "Enterprise edition", "Full
+  edition", "Community Edition" wording from README, SECURITY,
+  CONTRIBUTING, CHANGELOG, ROADMAP, code docstrings and issue
+  templates. The repository ships the open-source server only;
+  downstream consumers extend via the existing factory hooks.
+- `SECURITY.md` supported versions bumped to 0.2.x.
+- README configuration table updated: documents Redis/Valkey support,
+  `METRICS_KEY`, `LOG_RETENTION_DAYS`, `MAX_RESULTS`.
+
 ## [0.2.2] — 2026-05-05
 
 ### Added
@@ -179,8 +212,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New module `app/runtime_state.py` — port discovery, state dir resolver,
   free-port scanner. Pure functions, no global state apart from file I/O.
 - New module `app/metrics.py` — thread-safe `_Snapshot` counter + ASGI
-  middleware. Used by Community; replaceable by Enterprise OTel exporters
-  via the existing factory hook system.
+  middleware. Replaceable by Prometheus / OTel exporters via the factory
+  `extra_middleware` / `startup_hooks` extension points.
 - `app/installers.py` exposes `ALL_INSTALLERS` / `ALL_UNINSTALLERS`
   registries — CLI subcommands are generated dynamically from these maps,
   no per-client boilerplate to maintain when we add new clients.

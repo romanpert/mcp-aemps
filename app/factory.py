@@ -1,14 +1,15 @@
 # app/factory.py
 """Application factory — the public extension API.
 
-Community Edition uses `create_app()` with no arguments.
-Enterprise builds on top by passing extra routers, middleware, and lifecycle
-hooks — without forking the core:
+Default usage: ``create_app()`` with no arguments.
+
+Downstream consumers can compose on top by passing extra routers,
+middleware, and lifecycle hooks — without forking the core::
 
     from app.factory import create_app
-    from premium.routes import audit, batch_export, webhooks
-    from premium.middleware import OTelMiddleware, RBACMiddleware
-    from premium.lifecycle import init_otel, close_audit_log
+    from my_org.routes import audit, batch_export, webhooks
+    from my_org.middleware import OTelMiddleware, RBACMiddleware
+    from my_org.lifecycle import init_otel, close_audit_log
 
     app = create_app(
         extra_routers=[audit.router, batch_export.router, webhooks.router],
@@ -20,18 +21,22 @@ hooks — without forking the core:
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Awaitable, Callable, Sequence, Tuple, Type, Union
 
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import APIRouter, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi_mcp import FastApiMCP
+from pydantic import SecretStr
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
 from app.core import OperationError
 from app.lifespan import build_lifespan
 from app.logging_setup import configure_logging
+
+logger = logging.getLogger("mcp.aemps")
 
 # Routes
 from app.routes.datos_locales import router as datos_locales_router
@@ -75,8 +80,8 @@ def create_app(
     _install_default_middleware(app)
     _install_extra_middleware(app, extra_middleware)
 
-    # Lightweight in-process metrics middleware (Community Edition).
-    # For Prometheus/OTel, use the Enterprise edition.
+    # Lightweight in-process metrics middleware. Replace via the
+    # extra_middleware/startup_hooks args when you need Prometheus or OTel.
     from app.metrics import METRICS, metrics_middleware
 
     app.middleware("http")(metrics_middleware)
@@ -85,8 +90,40 @@ def create_app(
     async def _operation_error_handler(request: Request, exc: OperationError):  # noqa: D401, ARG001
         return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
 
+    @app.get("/health/live", include_in_schema=False)
+    async def health_live():  # noqa: D401
+        """Liveness — process is alive and the event loop responds."""
+        return JSONResponse({"status": "ok", "version": settings.mcp_aemps_version})
+
+    @app.get("/health/ready", include_in_schema=False)
+    async def health_ready():  # noqa: D401
+        """Readiness — cache backend reachable AND maestras warmup completed.
+
+        Kubernetes uses this to decide whether to send traffic. Returns 503
+        until the warmup task finishes (typically <5s on a cold start).
+        """
+        cache_mode = "redis" if getattr(app.state, "redis", None) else "in-memory"
+        warmup_task = getattr(app.state, "warmup_task", None)
+        warmup_done = warmup_task is None or warmup_task.done()
+
+        if not warmup_done:
+            return JSONResponse(
+                {"status": "starting", "cache": cache_mode, "warmup": "in_progress"},
+                status_code=503,
+            )
+
+        return JSONResponse(
+            {
+                "status": "ok",
+                "version": settings.mcp_aemps_version,
+                "cache": cache_mode,
+                "warmup": "completed",
+            }
+        )
+
     @app.get("/health", include_in_schema=False)
     async def health():  # noqa: D401
+        """Backwards-compatible combined liveness+cache snapshot."""
         return JSONResponse(
             {
                 "status": "ok",
@@ -96,7 +133,16 @@ def create_app(
         )
 
     @app.get("/internal/metrics", include_in_schema=False)
-    async def metrics():  # noqa: D401
+    async def metrics(x_metrics_key: str | None = Header(default=None)):  # noqa: D401
+        configured = settings.metrics_key
+        if configured is not None:
+            expected = (
+                configured.get_secret_value()
+                if isinstance(configured, SecretStr)
+                else str(configured)
+            )
+            if not x_metrics_key or x_metrics_key != expected:
+                raise HTTPException(status_code=401, detail="Invalid or missing X-Metrics-Key.")
         return JSONResponse(METRICS.snapshot())
 
     app.include_router(medicamentos_router)
@@ -109,6 +155,12 @@ def create_app(
     if mount_mcp:
         mcp = FastApiMCP(app, name=title, description=description)
         mcp.mount_http()
+
+    if settings.metrics_key is None:
+        logger.warning(
+            "METRICS_KEY is not set — /internal/metrics is publicly readable. "
+            "Set METRICS_KEY in production deployments."
+        )
 
     return app
 

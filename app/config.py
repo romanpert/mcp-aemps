@@ -1,9 +1,10 @@
 # app/config.py
 """Pydantic settings loaded from environment / .env.
 
-Community Edition runs with zero required env vars. Redis is optional —
-if no REDIS_URL (or no redis_password+redis_host) is set, the server uses
-in-memory cache and rate limiting and continues to work normally.
+The server runs with zero required env vars. Redis (or any Redis-compatible
+store like Valkey) is optional — if ``REDIS_URL`` (or
+``redis_password+redis_host``) is unset, the server uses in-memory cache
+and rate limiting and continues to work normally.
 """
 
 from __future__ import annotations
@@ -52,7 +53,8 @@ class Settings(BaseSettings):
     access_host: str = Field("localhost", description="Public host clients use")
     port: int = Field(8000, description="TCP port")
 
-    # Redis is OPTIONAL. Community uses in-memory; Enterprise/production sets these.
+    # Redis (or Valkey) is OPTIONAL. Default in-memory; production deployments
+    # typically set REDIS_URL for distributed cache + rate limiting.
     redis_host: Optional[str] = Field(None, description="Redis host (optional)")
     redis_port: int = Field(6379, description="Redis port")
     redis_user: str = Field("default", description="Redis user")
@@ -72,6 +74,11 @@ class Settings(BaseSettings):
     )
 
     max_results: int = Field(30, description="Maximum results per page")
+
+    metrics_key: Optional[SecretStr] = Field(
+        None,
+        description="If set, /internal/metrics requires a matching X-Metrics-Key header.",
+    )
 
     @field_validator("allowed_origins", mode="before")
     def split_allowed_origins(cls, v):
@@ -144,7 +151,7 @@ class Settings(BaseSettings):
 
     def safe_dump(self) -> dict:
         return self.model_dump(
-            exclude={"redis_password", "redis_url"},
+            exclude={"redis_password", "redis_url", "metrics_key"},
             exclude_none=True,
         )
 

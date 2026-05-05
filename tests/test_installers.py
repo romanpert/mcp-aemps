@@ -13,14 +13,20 @@ from app.installers import (
     install_claude_code,
     install_claude_desktop,
     install_codex,
+    install_continue,
     install_cursor,
+    install_jetbrains,
     install_vscode,
     install_windsurf,
+    install_zed,
     uninstall_claude_code,
     uninstall_claude_desktop,
+    uninstall_continue,
     uninstall_cursor,
+    uninstall_jetbrains,
     uninstall_vscode,
     uninstall_windsurf,
+    uninstall_zed,
 )
 
 
@@ -198,15 +204,127 @@ def test_windsurf_uninstall(tmp_path: Path) -> None:
     assert r.action == "removed"
 
 
+# --- Zed ------------------------------------------------------------------
+def test_zed_writes_context_servers(tmp_path: Path) -> None:
+    p = tmp_path / "settings.json"
+    r = install_zed(url="http://localhost:9000/mcp", config_path=p)
+    assert r.action == "added"
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert data["context_servers"]["mcp-aemps"] == {"url": "http://localhost:9000/mcp"}
+
+
+def test_zed_preserves_other_settings(tmp_path: Path) -> None:
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps({"theme": "One Dark", "buffer_font_size": 14}))
+    install_zed(url="http://localhost:9000/mcp", config_path=p)
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert data["theme"] == "One Dark"
+    assert data["buffer_font_size"] == 14
+    assert "mcp-aemps" in data["context_servers"]
+
+
+def test_zed_idempotent_and_uninstall(tmp_path: Path) -> None:
+    p = tmp_path / "settings.json"
+    install_zed(url="http://localhost:9000/mcp", config_path=p)
+    assert install_zed(url="http://localhost:9000/mcp", config_path=p).action == "unchanged"
+    assert install_zed(url="http://localhost:8080/mcp", config_path=p).action == "updated"
+    assert uninstall_zed(config_path=p).action == "removed"
+    assert uninstall_zed(config_path=p).action == "unchanged"
+
+
+# --- Continue.dev ---------------------------------------------------------
+def test_continue_adds_block_to_empty_config(tmp_path: Path) -> None:
+    p = tmp_path / "config.yaml"
+    r = install_continue(url="http://localhost:9000/mcp", config_path=p)
+    assert r.action == "added"
+    text = p.read_text(encoding="utf-8")
+    assert "mcp-aemps (managed by `mcp-aemps install continue`)" in text
+    assert "name: mcp-aemps" in text
+    assert "url: http://localhost:9000/mcp" in text
+
+
+def test_continue_preserves_existing_yaml(tmp_path: Path) -> None:
+    p = tmp_path / "config.yaml"
+    p.write_text("models:\n  - name: gpt-4o\n    provider: openai\n", encoding="utf-8")
+    install_continue(url="http://localhost:9000/mcp", config_path=p)
+    text = p.read_text(encoding="utf-8")
+    assert "models:" in text
+    assert "name: gpt-4o" in text
+    assert "name: mcp-aemps" in text
+
+
+def test_continue_idempotent_and_update(tmp_path: Path) -> None:
+    p = tmp_path / "config.yaml"
+    install_continue(url="http://localhost:9000/mcp", config_path=p)
+    assert install_continue(url="http://localhost:9000/mcp", config_path=p).action == "unchanged"
+    r = install_continue(url="http://localhost:8080/mcp", config_path=p)
+    assert r.action == "updated"
+    assert "url: http://localhost:8080/mcp" in p.read_text(encoding="utf-8")
+    assert "url: http://localhost:9000/mcp" not in p.read_text(encoding="utf-8")
+
+
+def test_continue_uninstall_removes_only_managed_block(tmp_path: Path) -> None:
+    p = tmp_path / "config.yaml"
+    p.write_text("models:\n  - name: gpt-4o\n", encoding="utf-8")
+    install_continue(url="http://localhost:9000/mcp", config_path=p)
+    r = uninstall_continue(config_path=p)
+    assert r.action == "removed"
+    text = p.read_text(encoding="utf-8")
+    assert "models:" in text
+    assert "mcp-aemps" not in text
+    assert uninstall_continue(config_path=p).action == "unchanged"
+
+
+# --- JetBrains Junie ------------------------------------------------------
+def test_jetbrains_writes_mcp_servers_block(tmp_path: Path) -> None:
+    p = tmp_path / "mcp.json"
+    r = install_jetbrains(url="http://localhost:9000/mcp", config_path=p)
+    assert r.action == "added"
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert data["mcpServers"]["mcp-aemps"] == {"type": "http", "url": "http://localhost:9000/mcp"}
+
+
+def test_jetbrains_preserves_other_servers(tmp_path: Path) -> None:
+    p = tmp_path / "mcp.json"
+    p.write_text(json.dumps({"mcpServers": {"other": {"type": "stdio", "command": "x"}}}))
+    install_jetbrains(url="http://localhost:9000/mcp", config_path=p)
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert "other" in data["mcpServers"]
+    assert "mcp-aemps" in data["mcpServers"]
+
+
+def test_jetbrains_idempotent_and_uninstall(tmp_path: Path) -> None:
+    p = tmp_path / "mcp.json"
+    install_jetbrains(url="http://localhost:9000/mcp", config_path=p)
+    assert install_jetbrains(url="http://localhost:9000/mcp", config_path=p).action == "unchanged"
+    assert install_jetbrains(url="http://localhost:8080/mcp", config_path=p).action == "updated"
+    assert uninstall_jetbrains(config_path=p).action == "removed"
+    assert uninstall_jetbrains(config_path=p).action == "unchanged"
+
+
+# --- Registry symmetry ----------------------------------------------------
+def test_all_installers_have_matching_uninstaller() -> None:
+    from app.installers import ALL_INSTALLERS, ALL_UNINSTALLERS
+
+    assert set(ALL_INSTALLERS.keys()) == set(ALL_UNINSTALLERS.keys()), (
+        "Every installer must have a matching uninstaller (and vice-versa). "
+        f"only-install: {set(ALL_INSTALLERS) - set(ALL_UNINSTALLERS)}; "
+        f"only-uninstall: {set(ALL_UNINSTALLERS) - set(ALL_INSTALLERS)}"
+    )
+
+
 # --- Path resolution per platform -----------------------------------------
 def test_path_resolution_returns_absolute_path() -> None:
     from app.installers import (
         claude_code_config_path,
         claude_desktop_config_path,
         codex_config_path,
+        continue_config_path,
         cursor_config_path,
+        jetbrains_config_path,
         vscode_settings_path,
         windsurf_config_path,
+        zed_settings_path,
     )
 
     for fn in (
@@ -216,6 +334,9 @@ def test_path_resolution_returns_absolute_path() -> None:
         cursor_config_path,
         vscode_settings_path,
         windsurf_config_path,
+        zed_settings_path,
+        continue_config_path,
+        jetbrains_config_path,
     ):
         p = fn()
         assert isinstance(p, Path)

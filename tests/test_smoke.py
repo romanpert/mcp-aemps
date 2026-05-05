@@ -44,18 +44,18 @@ def test_openapi_exposes_official_cima_endpoints() -> None:
 
 
 def test_create_app_accepts_extra_routers() -> None:
-    """Factory must allow Enterprise edition to inject extra routers."""
+    """Factory must let downstream consumers inject extra routers."""
     from fastapi import APIRouter
 
     extra = APIRouter()
 
-    @extra.get("/_premium/audit")
+    @extra.get("/_extra/audit")
     async def audit():
         return {"ok": True}
 
     app = create_app(extra_routers=[extra], mount_mcp=False)
     with TestClient(app) as client:
-        assert client.get("/_premium/audit").status_code == 200
+        assert client.get("/_extra/audit").status_code == 200
         # Core still works
         assert client.get("/health").status_code == 200
 

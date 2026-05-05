@@ -1,12 +1,13 @@
 # app/lifespan.py
 """Composable lifespan with explicit extension points.
 
-Community core wires up: cache backend init -> maestras warmup -> serving ->
+Default wiring: cache backend init -> maestras warmup -> serving ->
 maestras task cancellation -> cache backend close.
 
-Enterprise editions inject extra hooks (OTel init, audit log flush,
-external connection pools, etc.) via the `startup_hooks` and `shutdown_hooks`
-parameters of `build_lifespan` — without forking this module.
+Downstream consumers can inject extra hooks (OTel init, audit log flush,
+external connection pools, etc.) via the ``startup_hooks`` and
+``shutdown_hooks`` parameters of ``build_lifespan`` — without forking this
+module.
 """
 
 from __future__ import annotations
