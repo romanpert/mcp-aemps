@@ -56,9 +56,12 @@ After `pip install mcp-aemps`, register the server with your MCP client in
 mcp-aemps install
 
 # Or pick one
-mcp-aemps install claude-desktop
-mcp-aemps install claude-code
+mcp-aemps install claude-desktop   # uses npx mcp-remote bridge (works today)
+mcp-aemps install claude-code      # uses `claude mcp add` if available
 mcp-aemps install codex
+mcp-aemps install vscode           # writes mcp.servers in user settings.json
+mcp-aemps install cursor           # writes ~/.cursor/mcp.json
+mcp-aemps install windsurf         # writes ~/.codeium/windsurf/mcp_config.json
 
 # Custom URL or server key
 mcp-aemps install --url http://my-host:9000/mcp --name aemps
@@ -71,23 +74,32 @@ mcp-aemps uninstall                  # remove from all
 mcp-aemps uninstall claude-desktop   # one client only
 ```
 
-The installer is **idempotent** — running it twice is safe — and **preserves
-existing entries** in your client config. It edits the right file per OS:
+**Properties** — installers are *idempotent* (safe to re-run), *additive*
+(preserves your other entries), *atomic* (write succeeds fully or not at all),
+and *port-aware* (read the actual port `mcp-aemps up` bound to, so you can
+change ports without re-installing).
+
+**Per-OS config paths:**
 
 | Client | macOS | Windows | Linux |
 |---|---|---|---|
 | Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` | `%APPDATA%\Claude\claude_desktop_config.json` | `~/.config/Claude/claude_desktop_config.json` |
 | Claude Code | `claude mcp add` (preferred) → fallback `~/.claude.json` | same | same |
 | Codex | `~/.codex/config.toml` | `%USERPROFILE%\.codex\config.toml` | `~/.codex/config.toml` |
+| VS Code | `~/Library/Application Support/Code/User/settings.json` | `%APPDATA%\Code\User\settings.json` | `~/.config/Code/User/settings.json` |
+| Cursor | `~/.cursor/mcp.json` | same | same |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` | same | same |
 
-After install, **start the server** (in another terminal or as a background daemon):
+After install, **start the server** (default port: **`8765`** — chosen to avoid
+collisions with the very common `8000`/`5000`/`3000`):
 
 ```bash
 mcp-aemps up           # foreground
 mcp-aemps up --daemon  # background
+mcp-aemps up --port 9000  # explicit port; auto-fallback enabled by default
 ```
 
-Then restart your client. `mcp-aemps` will appear as an available MCP server.
+Then restart your client. `mcp-aemps` appears as an available MCP server.
 
 ---
 
@@ -134,7 +146,7 @@ All settings via environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PORT` | `8000` | Server port |
+| `PORT` | `8765` | Server port (`mcp-aemps up --auto-port` finds free if busy) |
 | `REDIS_URL` | — | Redis connection (optional, enables caching) |
 | `ALLOWED_ORIGINS` | `http://localhost:3000` | CORS origins |
 | `METRICS_KEY` | — | Auth key for `/internal/metrics` |
@@ -146,10 +158,16 @@ All settings via environment variables:
 
 ## Observability
 
-- **Structured JSON logging** with correlation IDs per request
-- **OpenTelemetry** tracing (OTLP export)
-- **Prometheus metrics** at `/internal/metrics` (protected by `x-metrics-key`)
-- **Health check** at `/health`
+Community Edition ships with **lightweight in-process observability** —
+no external collector required:
+
+- **Health check** at `/health` — `{status, version, cache}` JSON snapshot
+- **In-process metrics** at `/internal/metrics` — `{requests_total,
+  requests_by_path, status_codes, errors_5xx, uptime_seconds}` JSON
+- **Structured stdlib logging** with daily rotation + gzip retention
+
+For OpenTelemetry tracing, Prometheus exposition, distributed log
+correlation, or audit-grade event streams, use the **Enterprise edition**.
 
 ---
 

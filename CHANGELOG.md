@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] — 2026-05-05
+
+### Added
+- **VS Code, Cursor, Windsurf installers** — `mcp-aemps install vscode|cursor|windsurf`.
+  Idempotent, atomic, additive. Total clients now: 6 (Claude Desktop, Claude Code,
+  Codex, VS Code, Cursor, Windsurf).
+- **Lightweight metrics endpoint** — `GET /internal/metrics` returns a JSON
+  snapshot (`requests_total`, `requests_by_path`, `status_codes`, `errors_5xx`,
+  `uptime_seconds`, `version`). Zero external deps.
+- **Runtime port discovery** — `mcp-aemps up/dev` writes the actually-bound
+  host:port to a per-user state file (`~/.local/state/mcp-aemps/runtime.json`
+  or per-OS equivalent). `mcp-aemps install` reads it automatically — change
+  the port without re-installing clients.
+- **`.marketing/` directory** (gitignored) — scaffold for launch material.
+- 32 tests total (was 19) covering all 6 installers and runtime state.
+
+### Changed
+- **Default port: `8000` → `8765`** to avoid collisions with the very
+  common 8000 (uvicorn/Django dev), 5000 (Flask), 3000 (Node/Next).
+- **Claude Desktop installer fix** — was generating `{"url": "..."}` which
+  Claude Desktop **rejects** (its config validator requires stdio entries
+  for HTTP MCP servers go through the Connectors UI). Now uses the
+  official `mcp-remote` npm bridge: `{"command": "npx", "args": ["-y",
+  "mcp-remote", "..."]}`. Fixes "configuración no válida" error.
+- CLI: `mcp-aemps up` and `dev` now flag-driven (`--auto-port` / `--no-auto-port`)
+  instead of silent fallback. Port-busy fallback is on by default.
+- CLI runtime files moved from CWD to per-user state dir
+  (`~/.local/state/mcp-aemps/` etc.). No more `.mcp_aemps.pid` polluting cwd.
+- CONTRIBUTING.md simplified — dropped the maintainer-only release
+  walkthrough (release pipeline is fully automated, no manual steps to share).
+- GitHub Actions workflows opt into `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true`
+  (Node.js 20 is deprecated as of June 2026).
+
+### Architecture
+
+- New module `app/runtime_state.py` — port discovery, state dir resolver,
+  free-port scanner. Pure functions, no global state apart from file I/O.
+- New module `app/metrics.py` — thread-safe `_Snapshot` counter + ASGI
+  middleware. Used by Community; replaceable by Enterprise OTel exporters
+  via the existing factory hook system.
+- `app/installers.py` exposes `ALL_INSTALLERS` / `ALL_UNINSTALLERS`
+  registries — CLI subcommands are generated dynamically from these maps,
+  no per-client boilerplate to maintain when we add new clients.
+
 ## [0.1.3] — 2026-05-05
 
 ### Added
@@ -98,6 +142,7 @@ First public release.
   `Permissions-Policy`.
 - No PII processed: CIMA exposes medicine metadata only.
 
+[0.1.4]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.1.4
 [0.1.3]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.1.3
 [0.1.2]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.1.2
 [0.1.1]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.1.1
