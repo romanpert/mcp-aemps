@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] — 2026-05-05
+
+### Added
+- README ownership marker (`mcp-name: io.github.romanpert/mcp-aemps`) required
+  by the official MCP Registry to validate PyPI package ownership.
+
 ## [0.1.0] — 2026-05-05
 
 First public release.
@@ -36,4 +42,5 @@ First public release.
   `Permissions-Policy`.
 - No PII processed: CIMA exposes medicine metadata only.
 
+[0.1.1]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.1.1
 [0.1.0]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.1.0

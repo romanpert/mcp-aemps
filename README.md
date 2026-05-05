@@ -162,3 +162,6 @@ For licensing, integration support, or custom deployments:
 ## License
 
 Apache-2.0 © [Román Pérez Dumpert](https://github.com/romanpert)
+
+<!-- MCP Registry ownership marker — DO NOT REMOVE -->
+<sub><sup>mcp-name: io.github.romanpert/mcp-aemps</sup></sub>
