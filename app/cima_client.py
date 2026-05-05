@@ -5,16 +5,15 @@ Endpoints documentados en CIMA REST API v1.23.
 Transport: httpx (sin aiohttp).
 """
 from __future__ import annotations
-import base64
+
 import asyncio
 import json
-from typing import Any, Dict, List, Optional, Literal, AsyncIterator, Union
-from datetime import datetime, timezone, timedelta
-from dateutil import parser
-
-from fastapi import HTTPException
 import logging
+from datetime import datetime, timedelta, timezone
+from typing import Any, AsyncIterator, Dict, List, Literal, Optional, Union
+
 import httpx
+from dateutil import parser
 from httpx import HTTPStatusError
 
 from app.config import settings

@@ -20,21 +20,22 @@ En `app/mcp_aemps.json` se diferencian:
 """
 from __future__ import annotations
 
-import os
-import sys
-import subprocess
-import webbrowser
 import json
+import os
 import socket
+import subprocess
+import sys
+import webbrowser
 from pathlib import Path
 from typing import Optional, Tuple
 
+import httpx
 import typer
 import uvicorn
-import httpx
+from rich.align import Align
 from rich.console import Console
 from rich.panel import Panel
-from rich.align import Align
+
 from app.config import settings
 
 console = Console()
@@ -297,7 +298,7 @@ def down():
 def status():
     """Comprueba si el servidor está en marcha."""
     if not PID_FILE.exists():
-        console.print(f"❌  No hay servidor en ejecución.", style="red")
+        console.print("❌  No hay servidor en ejecución.", style="red")
         raise typer.Exit(code=1)
     pid = int(PID_FILE.read_text())
     try:

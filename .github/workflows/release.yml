@@ -1,0 +1,114 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install poetry
+        run: pip install "poetry>=2.0"
+      - name: Verify tag matches version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VER=$(poetry version -s)
+          if [ "$TAG" != "$VER" ]; then
+            echo "Tag $TAG does not match pyproject version $VER" >&2
+            exit 1
+          fi
+      - name: Build
+        run: poetry build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish-pypi:
+    name: Publish to PyPI (Trusted Publisher / OIDC)
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/mcp-aemps/
+    permissions:
+      id-token: write   # required for OIDC trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-mcp-registry:
+    name: Publish to MCP Registry
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # required for github-oidc auth
+    steps:
+      - uses: actions/checkout@v4
+      - name: Wait for PyPI indexing
+        run: |
+          for i in $(seq 1 30); do
+            v=$(curl -s "https://pypi.org/pypi/mcp-aemps/json" | python3 -c "import sys,json;print(json.load(sys.stdin).get('info',{}).get('version',''))")
+            tag="${GITHUB_REF_NAME#v}"
+            if [ "$v" = "$tag" ]; then echo "PyPI indexed $v"; exit 0; fi
+            sleep 10
+          done
+          echo "Timed out waiting for PyPI" >&2; exit 1
+      - name: Download mcp-publisher
+        run: |
+          curl -sL -o pub.tar.gz "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz"
+          tar xzf pub.tar.gz mcp-publisher
+      - name: Sync server.json version with tag
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          python3 -c "
+          import json, sys
+          d = json.load(open('server.json'))
+          d['version'] = '$tag'
+          for p in d.get('packages', []):
+              p['version'] = '$tag'
+          json.dump(d, open('server.json','w'), indent=2)
+          "
+      - name: Login (GitHub OIDC, no manual token)
+        run: ./mcp-publisher login github-oidc
+      - name: Publish
+        run: ./mcp-publisher publish
+
+  github-release:
+    name: Create GitHub Release
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Extract changelog section
+        id: notes
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          awk -v tag="$tag" '
+            $0 ~ "^## \\["tag"\\]" {flag=1; next}
+            flag && /^## \[/ {exit}
+            flag {print}
+          ' CHANGELOG.md > release_notes.md
+          echo "Generated notes:"; cat release_notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: release_notes.md
+          files: dist/*
+          generate_release_notes: false
+          fail_on_unmatched_files: true

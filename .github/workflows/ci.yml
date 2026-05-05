@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [master, dev]
+  push:
+    branches: [master, dev]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install ruff
+        run: pip install ruff
+      - name: Ruff check
+        run: ruff check app/
+      - name: Ruff format check
+        run: ruff format --check app/
+
+  test:
+    name: Test (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: Install package
+        run: |
+          pip install --upgrade pip
+          pip install -e .
+      - name: Smoke test — import and instantiate
+        run: |
+          python -c "
+          from app.factory import create_app
+          from fastapi.testclient import TestClient
+          app = create_app(mount_mcp=False)
+          with TestClient(app) as c:
+              r = c.get('/health')
+              assert r.status_code == 200, r.text
+              body = r.json()
+              assert body['status'] == 'ok'
+              assert body['cache'] == 'in-memory'
+              assert body['version']
+              spec = c.get('/openapi.json').json()
+              assert len(spec['paths']) > 15
+              print('Health:', body)
+              print('Endpoints:', len(spec['paths']))
+          "
+
+  build:
+    name: Build wheel & sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install poetry
+        run: pip install "poetry>=2.0" twine
+      - name: Build
+        run: poetry build
+      - name: Twine check
+        run: python -m twine check dist/*
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  validate-server-json:
+    name: Validate server.json
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download mcp-publisher
+        run: |
+          curl -sL -o pub.tar.gz "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz"
+          tar xzf pub.tar.gz mcp-publisher
+      - name: Validate server.json
+        run: ./mcp-publisher validate

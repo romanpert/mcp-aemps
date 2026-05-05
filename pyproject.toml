@@ -50,7 +50,7 @@ Homepage = "https://github.com/romanpert/mcp-aemps"
 Repository = "https://github.com/romanpert/mcp-aemps"
 Documentation = "https://github.com/romanpert/mcp-aemps#readme"
 "Bug Tracker" = "https://github.com/romanpert/mcp-aemps/issues"
-Changelog = "https://github.com/romanpert/mcp-aemps/blob/main/CHANGELOG.md"
+Changelog = "https://github.com/romanpert/mcp-aemps/blob/master/CHANGELOG.md"
 
 [project.scripts]
 mcp_aemps = "app.cli:cli"
@@ -65,3 +65,20 @@ exclude = [
   "app/**/__pycache__",
   "**/.pytest_cache",
 ]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = [".venv", "venv", "dist", "build"]
+
+[tool.ruff.lint]
+# Conservative ruleset — no aggressive rewrites for v0.1.x baseline.
+select = ["E", "F", "W", "I"]
+ignore = [
+  "E501",  # line too long (we use line-length 110, but keep flexibility)
+  "E741",  # ambiguous variable names (CIMA params use Spanish/short names)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"app/mcp_constants.py" = ["E501"]  # long descriptive prompts
+"app/cli.py" = ["E501"]             # banner art lines

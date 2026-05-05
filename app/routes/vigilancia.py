@@ -12,7 +12,8 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from dateutil import parser as date_parser
-from fastapi import APIRouter, HTTPException, Query, Path as FPath
+from fastapi import APIRouter, HTTPException, Query
+from fastapi import Path as FPath
 
 import app.cima_client as cima
 from app.config import settings
@@ -20,7 +21,6 @@ from app.helpers import (
     API_PSUM_VERSION,
     _build_metadata,
     format_response,
-    parse_cima_fechas_list,
     safe_cima_call,
 )
 from app.rate_limits import limit_heavy, limit_standard
