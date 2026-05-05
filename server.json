@@ -3,18 +3,18 @@
   "name": "io.github.romanpert/mcp-aemps",
   "title": "MCP AEMPS — CIMA",
   "description": "MCP server for the Spanish AEMPS CIMA pharmaceutical registry (20,000+ authorised medicines).",
-  "websiteUrl": "https://github.com/romanpert/mcp_aemps",
+  "websiteUrl": "https://github.com/romanpert/mcp-aemps",
   "repository": {
-    "url": "https://github.com/romanpert/mcp_aemps",
+    "url": "https://github.com/romanpert/mcp-aemps",
     "source": "github"
   },
-  "version": "0.1.4",
+  "version": "0.1.5",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "mcp-aemps",
-      "version": "0.1.4",
+      "version": "0.1.5",
       "runtimeHint": "uvx",
       "transport": {
         "type": "streamable-http",
@@ -33,10 +33,6 @@
           "default": "8765"
         },
         {
-          "name": "REDIS_URL",
-          "description": "Optional Redis URL for distributed cache and rate limiting (in-memory used if absent)"
-        },
-        {
           "name": "ALLOWED_ORIGINS",
           "description": "Comma-separated CORS origins",
           "default": "http://localhost:3000"
@@ -47,14 +43,8 @@
           "default": "INFO"
         },
         {
-          "name": "RATE_LIMIT",
-          "description": "Global rate-limit fallback (requests per period)",
-          "default": "100"
-        },
-        {
-          "name": "RATE_PERIOD",
-          "description": "Rate-limit period in seconds",
-          "default": "60"
+          "name": "REDIS_URL",
+          "description": "Optional Redis URL for distributed cache and rate limiting (in-memory used if absent)"
         }
       ]
     }

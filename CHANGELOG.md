@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] — 2026-05-05
+
+### Added
+- **Docker, multi-stage**: new `Dockerfile` (~150 MB final image, was ~280 MB) +
+  `.dockerignore`. Non-root UID 10001, healthcheck via curl.
+- **`docker-compose.yml`** minimal: server + optional Redis backend (commented).
+- **`.github/workflows/docker.yml`** — multi-arch (`linux/amd64`, `linux/arm64`)
+  build & push to GHCR on every tag + master, with provenance and SBOM.
+  Image: `ghcr.io/romanpert/mcp-aemps:latest`.
+- **ETag / If-None-Match revalidation** in `app/cima_client.py` — hot-path
+  CIMA queries (`medicamento`, `presentaciones`, `maestras`) now send
+  `If-None-Match` against AEMPS's 30-min CDN cache; on 304 we return the
+  in-process cached payload without re-parsing. Reduces upstream load by
+  ~10× on repeated queries.
+- **README badges**: CI status, Python versions, monthly downloads,
+  MCP Registry listing.
+
+### Changed
+- **Removed dead env vars**: `RATE_LIMIT` and `RATE_PERIOD` were no longer
+  used after the v0.1.3 rate-limit refactor. `server.json` env-var list
+  trimmed to: `PORT`, `ALLOWED_ORIGINS`, `LOG_LEVEL`, `REDIS_URL`.
+- `.gitignore` now covers `.ruff_cache/`, `.mypy_cache/`.
+
+### Architecture
+- ETag cache is module-level in `cima_client.py` (bounded LRU at 2048 entries)
+  — no Redis required for this layer; per-process is sufficient given CIMA's
+  long Cache-Control TTLs.
+
+### Roadmap notes
+- **stdio MCP transport** (Anthropic-canonical `uvx mcp-aemps stdio` pattern)
+  deferred to v0.1.6 — fastapi-mcp 0.4.0 only exposes HTTP/SSE; needs either
+  upstream upgrade or an internal mcp-proxy bridge. Current HTTP transport
+  works with all clients via the `mcp-remote` bridge (Claude Desktop) or
+  native HTTP support (Claude Code, Codex, VS Code, Cursor, Windsurf).
+
 ## [0.1.4] — 2026-05-05
 
 ### Added
@@ -142,6 +177,7 @@ First public release.
   `Permissions-Policy`.
 - No PII processed: CIMA exposes medicine metadata only.
 
+[0.1.5]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.1.5
 [0.1.4]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.1.4
 [0.1.3]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.1.3
 [0.1.2]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.1.2
