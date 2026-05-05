@@ -29,13 +29,8 @@
       "environmentVariables": [
         {
           "name": "PORT",
-          "description": "TCP port for the HTTP server",
+          "description": "TCP port for the HTTP server (used in transport URL template)",
           "default": "8765"
-        },
-        {
-          "name": "ALLOWED_ORIGINS",
-          "description": "Comma-separated CORS origins",
-          "default": "http://localhost:3000"
         },
         {
           "name": "LOG_LEVEL",
