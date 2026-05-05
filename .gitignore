@@ -1,16 +1,67 @@
-# Ignorar todas las carpetas llamadas "test" en cualquier nivel
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.whl
+MANIFEST
+
+# ── Virtual environments ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+.env/
+
+# ── Environment & secrets ──────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.env
+
+# ── PID / runtime state ────────────────────────────────────────────────────────
+.mcp_aemps.pid
+*.pid
+
+# ── Logs ───────────────────────────────────────────────────────────────────────
+logs/
+*.log
+
+# ── IDE / editors ──────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Claude Code / AI tooling ──────────────────────────────────────────────────
+.claude/
+CLAUDE.md
+.code-review-graph/
+graphify-out/
+GRAPH_REPORT.md
+
+# ── Tests (no publicar datasets) ─────────────────────────────────────────────
 tests/**
 
-app/__pycache__/**
-
-# Ignorar el archivo dependencies.py en app/
-app/dependencies.py
-
-# Mantener la carpeta data/, pero descartar todos sus archivos
+# ── Data (solo assets y logo públicos) ───────────────────────────────────────
+# Mantener estructura de carpetas
 !data/
+!data/assets/
 data/assets/mcp_aemps_logo_v1.jpeg
-data/assets/mcp_aemps_logo_v2.jpg
 data/assets/mcp_aemps_logo_v2.psd
 data/documentacion/*
 data/img/*
 data/pdf/*
+
+# ── CI/CD internos ────────────────────────────────────────────────────────────
+Jenkinsfile
+
+# ── Artefactos de OpenAPI descargados ─────────────────────────────────────────
+openapi.json

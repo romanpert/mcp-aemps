@@ -1,4 +1,4 @@
-# app/cli.py – CLI para el servidor MCP-AEMPS
+# v2/mcp_aemps/app/cli.py – CLI para el servidor MCP-AEMPS
 """💊 CLI del servidor MCP-AEMPS (Agencia Española de Medicamentos y Productos Sanitarios).
 
 Comandos principales
@@ -13,7 +13,7 @@ Comandos principales
 • **openapi** → descarga la especificación OpenAPI (`/openapi.json`).
 • **docs**    → abre la documentación Swagger UI en el navegador.
 
-En `.mcp_aemps.json` se diferencian:
+En `app/mcp_aemps.json` se diferencian:
   - `uvicorn_host`: dirección donde bindea Uvicorn (p.ej. "0.0.0.0").
   - `access_host`: host que usan los clientes para acceder (p.ej. "localhost").
   - `port`: puerto TCP.
@@ -44,6 +44,7 @@ DEFAULT_ACCESS_HOST = "localhost"
 DEFAULT_PORT = 8000
 PID_FILE = Path(".mcp_aemps.pid")
 CONFIG_FILE = Path("app/mcp_aemps.json")
+DEFAULT_APP_LOG = Path(settings.log_dir) / "mcp_aemps.log"
 
 cli = typer.Typer(add_completion=False, help="CLI del servidor MCP-AEMPS (AEMPS/CIMA)")
 
@@ -85,7 +86,7 @@ def _banner() -> None:
     )
     console.print(info_panel)
     console.print("")
-    console.print(f"[dim]Versión: {settings.mcp_version}[/dim]", justify="center")
+    console.print(f"[dim]Versión: {settings.mcp_aemps_version}[/dim]", justify="center")
     console.print("")
 
 
@@ -104,20 +105,22 @@ def _load_config() -> Tuple[str, str, int]:
 
 
 def _save_config(uvicorn_host: str, access_host: str, port: int) -> None:
-    """Actualiza uvicorn_host, access_host y port sin perder el resto."""
     data = {}
     if CONFIG_FILE.exists():
         try:
             data = json.loads(CONFIG_FILE.read_text())
         except json.JSONDecodeError:
             pass
-    data.update({
-        "uvicorn_host": uvicorn_host,
-        "access_host":  access_host,
-        "port":         port,
-    })
+    data.update({"uvicorn_host": uvicorn_host, "access_host": access_host, "port": port})
+
     try:
-        CONFIG_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+        tmp = CONFIG_FILE.with_suffix(CONFIG_FILE.suffix + ".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+        try:
+            os.chmod(tmp, 0o600)
+        except Exception:
+            pass
+        tmp.replace(CONFIG_FILE)  # movimiento atómico en el mismo filesystem
     except Exception:
         console.print("⚠️  No se pudo guardar la configuración en disco.", style="yellow")
 
@@ -137,6 +140,12 @@ def _find_free_port(start_port: int, host: str = DEFAULT_UVICORN_HOST) -> int:
             except OSError:
                 port += 1
 
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
 
 @cli.callback(invoke_without_command=True)
 def main(ctx: typer.Context):
@@ -165,6 +174,7 @@ def up(
     daemon: bool = typer.Option(
         False, "--daemon/--no-daemon", help="Ejecutar en background"
     ),
+    access_log: bool = typer.Option(False, "--access-log/--no-access-log", help="Access log de Uvicorn"),
 ):
     """Arranca el servidor *sin* autorecarga, orientado a producción."""
     _banner()
@@ -178,19 +188,43 @@ def up(
         )
         port = puerto_libre
 
+    log_level = log_level.lower()
     cmd = [
-        sys.executable,
-        "-m",
-        "uvicorn",
-        APP_IMPORT,
-        "--host", uvicorn_host,
-        "--port", str(port),
+        sys.executable, "-m", "uvicorn", APP_IMPORT,
+        "--host", uvicorn_host, "--port", str(port),
         "--workers", str(workers),
         "--log-level", log_level,
     ]
+    if not access_log:
+        cmd.append("--no-access-log")
+
+    # en up(), justo antes de Popen():
+    if daemon and PID_FILE.exists():
+        try:
+            existing = int(PID_FILE.read_text())
+            if _pid_alive(existing):
+                console.print(f"❌  Ya hay un servidor en ejecución (PID {existing}). Usa `down` o `restart`.", style="red")
+                raise typer.Exit(code=1)
+        except Exception:
+            PID_FILE.unlink(missing_ok=True)
+
     if daemon:
-        proc = subprocess.Popen(cmd)
+        log_path = DEFAULT_APP_LOG
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        f_out = open(log_path, "a")
+        # POSIX
+        popen_kwargs = {"start_new_session": True, "stdout": f_out, "stderr": f_out}
+        # Windows (opcional):
+        if os.name == "nt":
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore
+
+        proc = subprocess.Popen(cmd, **popen_kwargs)
+        f_out.close()
         PID_FILE.write_text(str(proc.pid))
+        try:
+            os.chmod(PID_FILE, 0o600)
+        except Exception:
+            pass
         console.print(
             f"🚀  Servidor en marcha (PID [bold]{proc.pid}[/]) → http://{access_host}:{port}",
             style="green",
@@ -212,6 +246,7 @@ def dev(
         "localhost", help="Host público para acceder a la API"
     ),
     port: int = typer.Option(DEFAULT_PORT, help="Puerto TCP"),
+    access_log: bool = typer.Option(True, "--access-log/--no-access-log", help="Access log de Uvicorn"),
 ):
     """Arranca el servidor con `--reload` para desarrollo rápido."""
     _banner()
@@ -234,6 +269,7 @@ def dev(
         port=port,
         reload=True,
         log_level="debug",
+        access_log=access_log,  # <- parámetro nativo de uvicorn.run
     )
 
 
@@ -246,8 +282,10 @@ def down():
     pid = int(PID_FILE.read_text())
     console.print(f"🔻  Enviando SIGTERM al proceso {pid}…")
     try:
-        os.kill(pid, 15)
-        console.print("🛑  Servidor detenido correctamente.", style="bold red")
+        try:
+            os.killpg(os.getpgid(pid), 15)
+        except Exception:
+            os.kill(pid, 15)
     except ProcessLookupError:
         console.print("⚠️  Proceso no encontrado; ya estaba parado.", style="yellow")
     finally:
@@ -270,9 +308,10 @@ def status():
             style="green",
         )
     except OSError:
-        console.print(f"❌  No se encontró proceso con PID {pid}.", style="red")
+        console.print(f"❌  No se encontró proceso con PID {pid}. ¿Se cerró inesperadamente?", style="red")
         PID_FILE.unlink(missing_ok=True)
         CONFIG_FILE.unlink(missing_ok=True)
+        console.print("ℹ️  Puedes arrancar de nuevo con `app cli up --daemon` o `app cli dev`.", style="dim")
         raise typer.Exit(code=1)
 
 
@@ -307,12 +346,26 @@ def restart(
 
 @cli.command()
 def logs(
-    file: Path = typer.Option(..., exists=True, readable=True, help="Ruta al archivo de log"),
+    file: Path = typer.Option(DEFAULT_APP_LOG, exists=False, help="Ruta al archivo de log"),
 ):
-    """Muestra en tiempo real el contenido de un archivo de log."""
-    console.print(f"📜  Mostrando logs desde [bold]{file}[/], presiona Ctrl-C... ")
-    subprocess.run(["tail", "-f", str(file)])
-
+    if not file.exists():
+        console.print(f"⚠️  {file} no existe todavía. ¿Se arrancó el server?", style="yellow")
+        raise typer.Exit(code=1)
+    console.print(f"📜  Mostrando logs desde [bold]{file}[/], Ctrl-C para salir…")
+    # Fallback cross-platform si no hay `tail`
+    try:
+        subprocess.run(["tail", "-f", str(file)])
+    except FileNotFoundError:
+        import time
+        with file.open("r") as f:
+            f.seek(0, os.SEEK_END)
+            while True:
+                line = f.readline()
+                if not line:
+                    time.sleep(0.25)
+                    continue
+                sys.stdout.write(line)
+                sys.stdout.flush()
 
 @cli.command()
 def health(
@@ -339,6 +392,7 @@ def openapi(
     output: Path = typer.Option("openapi.json", help="Fichero de salida"),
     access_host: Optional[str] = typer.Option(None, help="Host público"),
     port: Optional[int] = typer.Option(None, help="Puerto API"),
+    open_browser: bool = typer.Option(False, help="Abrir en navegador tras descargar"),
 ):
     """Descarga la especificación OpenAPI, la guarda y abre en navegador."""
     _, acc, p = _load_config()
@@ -351,10 +405,10 @@ def openapi(
         resp.raise_for_status()
         output.write_text(resp.text)
         console.print(f"✅  Spec guardada en [bold]{output}[/].")
-        # Abrir el JSON en el navegador por defecto
-        file_url = output.resolve().as_uri()
-        console.print(f"🌐  Abriendo spec en {file_url}…")
-        webbrowser.open(file_url)
+        if open_browser:
+            file_url = output.resolve().as_uri()
+            console.print(f"🌐  Abriendo spec en {file_url}…")
+            webbrowser.open(file_url)
     except Exception as e:
         console.print(f"❌  Error descargando o abriendo OpenAPI: {e}", style="red")
         raise typer.Exit(code=1)

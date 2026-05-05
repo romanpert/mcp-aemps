@@ -12,23 +12,31 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = "^3.12"
-fastapi = "^0.115.9"
-fastapi-mcp = "^0.3.4"
-httpx = "^0.28.1"
-uvicorn = "^0.34.0"
-typer = "^0.15.2"
-pillow = "^11.2.1"
-openpyxl = "^3.1.5"
-aioredis = "^2.0.1"
-fastapi-cache2 = "^0.2.2"
-fastapi-limiter = "^0.1.6"
-passlib = { version = "^1.7.4", extras = ["bcrypt"] }
-python-jose = { version = "^3.5.0", extras = ["cryptography"] }
-PyMuPDF = "^1.26.1"
-opentelemetry-api = "^1.34.1"
-opentelemetry-sdk = "^1.34.1"
-opentelemetry-instrumentation-fastapi = "^0.55b1"
+python = "^3.13"
+fastapi = "0.116.2"
+fastapi-mcp = "0.4.0"
+httpx = "0.28.1"
+uvicorn = "0.35.0"
+typer = "0.17.4"
+pillow = "11.3.0"
+xlrd = "2.0.2"
+openpyxl = "3.1.5"
+aioredis = "1.3.1"
+fastapi-cache2 = "0.2.2"
+fastapi-limiter = "0.1.6"
+passlib = { version = "1.7.4", extras = ["bcrypt"] }
+pyjwt = { version = ">=2.10,<3.0", extras = ["crypto"] }
+PyMuPDF = "1.26.4"
+opentelemetry-api = "1.37.0"
+opentelemetry-sdk = "1.37.0"
+opentelemetry-instrumentation-fastapi = "0.58b0"
+opentelemetry-exporter-otlp = "1.37.0"
+opentelemetry-instrumentation-httpx = "0.58b0"
+opentelemetry-instrumentation-redis = "0.58b0"
+opentelemetry-instrumentation-logging = "0.58b0"
+opentelemetry-instrumentation-aiohttp-client = "0.58b0"
+opentelemetry-propagator-b3 = "1.37.0"
+watchfiles = "1.1.0"
 
 [tool.poetry.scripts]
 mcp_aemps = "app.cli:cli"

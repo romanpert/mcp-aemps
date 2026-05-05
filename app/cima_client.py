@@ -16,18 +16,20 @@ from __future__ import annotations
 import base64
 import asyncio
 import json
-from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Literal, AsyncIterator, Union
 from datetime import datetime, timezone, timedelta
 from dateutil import parser
-import aiohttp
-from aiohttp import ClientResponseError, ClientSession
-from fastapi import FastAPI, Query, HTTPException
+from aiohttp import ClientResponseError, ClientSession, ClientTimeout
+
+AIOHTTP_TIMEOUT = ClientTimeout(total=15)
+
+from fastapi import HTTPException
 import logging
 import httpx
 from httpx import HTTPStatusError
-from PIL import Image
+
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +56,7 @@ _DOC_TYPE_MAP: dict[str, int] = {
     'ipe': 3,   # el valor real que devuelve CIMA
     'ipt': 3,   # alias semántico para tu API
 }
-_IMG_FULL_TYPES = ['formafarmac', 'materialas']
+
 _DEFAULT_HEADERS = {'User-Agent': 'Mozilla/5.0'}
 
 # ---------------------------------------------------------------------------
@@ -100,39 +102,54 @@ def _parse_fecha(valor):
     # Otros tipos (None, bool, etc.)
     return valor
 
-async def _request(
-    method: str,
-    path: str,
-    *,
-    params: Dict[str, Any] | None = None,
-    json_body: Any | None = None,
-    client: httpx.AsyncClient | None = None,
-) -> Any | None:
-    """Lanza la petición y devuelve datos parseados o str si no es JSON."""
+async def _request(method: str, path: str, *, params: Optional[Dict[str, Any]] = None,
+                   json_body: Optional[Any] = None, client: Optional[httpx.AsyncClient] = None) -> Optional[Any]:
     owns_client = client is None
     if owns_client:
         client = httpx.AsyncClient(timeout=TIMEOUT)
 
     try:
-        resp = await client.request(method, f"{BASE_URL}/{path}", params=_clean(params), json=json_body)
+        clean_params = _clean(params)
+        full_url = f"{BASE_URL}/{path}"
+
+        if logger.isEnabledFor(logging.DEBUG):
+            keys = sorted(list((clean_params or {}).keys()))
+            logger.debug("HTTP %s %s | params_keys=%s", method, path, keys)
+
+        DEFAULT_REQ_HEADERS = {"Accept": "application/json", "User-Agent": "Mozilla/5.0"}
+
+        resp = await client.request(
+            method, full_url, params=clean_params, json=json_body, headers=DEFAULT_REQ_HEADERS
+        )
+
+        if logger.isEnabledFor(logging.DEBUG):
+            clen = resp.headers.get("Content-Length") or (len(resp.content) if resp.content is not None else 0)
+            logger.debug("HTTP %s %s | status=%s | bytes=%s", method, path, resp.status_code, clen)
+
         resp.raise_for_status()
 
-        # Cuerpo vacío
         if not resp.content:
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("HTTP %s %s | respuesta vacía", method, path)
             return None
 
-        # Intentamos JSON; si falla devolvemos text
         try:
             return resp.json()
         except (json.JSONDecodeError, ValueError):
+            # No exponer texto; si quieres, devuelve texto al llamador pero no lo loguees
             return resp.text
+
+    except httpx.HTTPStatusError as e:
+        logger.error("HTTPStatusError status=%s path=%s", e.response.status_code, path,
+                     exc_info=settings.log_stacktraces)
+        raise
+    except httpx.RequestError as e:
+        logger.error("RequestError (%s) path=%s", type(e).__name__, path,
+                     exc_info=settings.log_stacktraces)
+        raise
     finally:
         if owns_client:
             await client.aclose()
-
-def _ensure_dir(path: Path) -> None:
-    """Crea el directorio si no existe."""
-    path.mkdir(parents=True, exist_ok=True)
 
 # ---------------------------------------------------------------------------
 # 1. Medicamentos
@@ -290,18 +307,18 @@ async def psuministro(
         path, params = "psuministro", {"pagina": pagina, "tamanioPagina": tamanioPagina}
 
     url = f"{BASE_URL}/{path}"
-    async with ClientSession() as session:
+    async with ClientSession(timeout=AIOHTTP_TIMEOUT) as session:
         try:
             async with session.get(url, params=params, headers={"Accept": "application/json"}) as resp:
                 if resp.status == 400:
-                    text = await resp.text()
-                    raise ValueError(f"Parámetros inválidos: {text}")
+                    raise HTTPException(status_code=400, detail="Parámetros inválidos")
+                
                 if resp.status == 404 and cn:
                     return []  # detalle CN no existe
                 resp.raise_for_status()
                 raw = await resp.json()
         except ClientResponseError as e:
-            raise HTTPException(status_code=e.status, detail=str(e))
+            raise HTTPException(status_code=e.status, detail="Error remoto CIMA")
 
     def _enrich(item: dict) -> None:
         # 1) Detectar “sin problemas” o ausencia de tipo
@@ -337,121 +354,144 @@ async def psuministro(
 
 
 # ---------------------------------------------------------------------------
-# 8. Documentos segmentados – Secciones
+# 8. Documentos segmentados – Secciones (cliente CIMA “puro”)
 # ---------------------------------------------------------------------------
 async def doc_secciones(
     tipo_doc: int,
     *,
-    nregistro: str | None = None,
-    cn:        str | None = None
-) -> Any | None:
+    nregistro: str,
+) -> Optional[List[Dict[str, Any]]]:
     """
-    GET /docSegmentado/secciones/{tipo_doc}
-    Devuelve los metadatos de las secciones disponibles para un tipo de documento y medicamento.
+    GET docSegmentado/secciones/{tipo_doc}
+    Devuelve los metadatos de las secciones para un tipo de documento y un medicamento.
 
-    Parámetros:
-    - tipo_doc (int): Código de tipo de documento (1=Ficha Técnica, 2=Prospecto, 3–4 otros).
-      Debe estar en el rango [1,4].
-    - nregistro (str, opcional): Número de registro del medicamento.
-    - cn (str, opcional): Código nacional del medicamento.
-
-    Solo es obligatorio uno de (nregistro, cn).  
-    Raise:
-      ValueError: si no se proporciona ni nregistro ni cn.
-
-    Retorna:
-      lista de objetos con metadatos de sección (e.g. {"seccion": "4.2", "titulo": "...", "orden": 1})
-      o None si no hay resultado.
+    - CIMA SOLO acepta `nregistro` como parámetro.
+    - Se asume que `nregistro` YA está normalizado en capas superiores.
     """
-    if not (nregistro or cn):
-        raise ValueError("Se requiere 'nregistro' o 'cn'.")
-    return await _request(
-        "GET",
-        f"docSegmentado/secciones/{tipo_doc}",
-        params=_clean({"nregistro": nregistro, "cn": cn})
-    )
+    if not nregistro:
+        raise ValueError("Se requiere 'nregistro'.")
+
+    params = {"nregistro": nregistro}
+
+    try:
+        result = await _request(
+            "GET",
+            f"docSegmentado/secciones/{tipo_doc}",
+            params=params,
+        )
+
+        if result is None:
+            return []
+
+        if isinstance(result, list):
+            return result
+
+        if isinstance(result, dict):
+            return [result]
+
+        logger.warning("Resultado inesperado de CIMA (secciones): %s", type(result))
+        return []
+
+    except Exception as e:
+        logger.error(
+            "doc_secciones falló (%s)",
+            type(e).__name__,
+            exc_info=settings.log_stacktraces,
+        )
+        raise
+
 
 # ---------------------------------------------------------------------------
-# 9. Documentos segmentados – Contenido (SOLUCIÓN FINAL)
+# 9. Documentos segmentados – Contenido (cliente CIMA)
 # ---------------------------------------------------------------------------
 async def doc_contenido(
     tipo_doc: int,
     *,
-    nregistro: str | None = None,
-    cn:        str | None = None,
-    seccion:   str | None = None,
-    format:    str = "json",
+    nregistro: str,
+    seccion: str | None = None,
+    format: str = "json",
 ) -> Any | None:
     """
-    Obtiene contenido de documentos segmentados
+    Obtiene contenido de documentos segmentados desde CIMA.
+
     - tipo_doc: 1 (Ficha técnica) o 2 (Prospecto)
     - format: "json" (default), "html" o "txt"
+    - Se asume que `nregistro` YA está normalizado.
     """
-    if not (nregistro or cn):
-        raise ValueError("Se requiere 'nregistro' o 'cn'.")
-    
+    if not nregistro:
+        raise ValueError("Se requiere 'nregistro'.")
+
     if tipo_doc not in [1, 2]:
         raise ValueError(f"tipo_doc debe ser 1 o 2, recibido: {tipo_doc}")
 
     params = _clean({
         "nregistro": nregistro,
-        "cn":        cn,
         "seccion":   seccion,
     })
 
-    print(f"Llamando API: docSegmentado/contenido/{tipo_doc}")
-    print(f"Params: {params}")
-    print(f"Formato solicitado: {format}")
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "doc_contenido tipo_doc=%s | nregistro=%s | seccion=%s | format=%s",
+            tipo_doc,
+            nregistro,
+            seccion,
+            format,
+        )
 
     try:
-        # 🔥 SOLUCIÓN: Llamar sin headers, obtener JSON por defecto
+        # Pedimos siempre JSON a CIMA
         result = await _request(
             method="GET",
             path=f"docSegmentado/contenido/{tipo_doc}",
             params=params,
         )
-        
-        # Si el formato solicitado no es JSON, necesitamos convertir
+
         if format == "html":
-            # Si result es JSON con contenido HTML, extraerlo
             if isinstance(result, list) and result:
-                # Concatenar todo el contenido HTML de las secciones
                 html_content = ""
-                for seccion in result:
-                    if isinstance(seccion, dict) and 'contenido' in seccion:
-                        html_content += seccion['contenido']
+                for sec in result:
+                    if isinstance(sec, dict) and "contenido" in sec:
+                        html_content += sec["contenido"]
                 return html_content
-            elif isinstance(result, dict) and 'contenido' in result:
-                return result['contenido']
+            elif isinstance(result, dict) and "contenido" in result:
+                return result["contenido"]
             else:
                 return str(result)
-                
-        elif format == "txt":
-            # Convertir JSON a texto plano
+
+        if format == "txt":
+            import re as _re
+
             if isinstance(result, list) and result:
                 txt_content = ""
-                for seccion in result:
-                    if isinstance(seccion, dict):
-                        if 'titulo' in seccion:
-                            txt_content += f"{seccion['titulo']}\n"
-                        if 'contenido' in seccion:
-                            # Remover tags HTML del contenido
-                            import re
-                            clean_content = re.sub('<[^<]+?>', '', seccion['contenido'])
+                for sec in result:
+                    if isinstance(sec, dict):
+                        if "titulo" in sec:
+                            txt_content += f"{sec['titulo']}\n"
+                        if "contenido" in sec:
+                            clean_content = _re.sub(
+                                "<[^<]+?>",
+                                "",
+                                sec["contenido"],
+                            )
                             txt_content += f"{clean_content}\n\n"
                 return txt_content.strip()
-            elif isinstance(result, dict) and 'contenido' in result:
-                import re
-                return re.sub('<[^<]+?>', '', result['contenido'])
+            elif isinstance(result, dict) and "contenido" in result:
+                import re as _re
+                return _re.sub("<[^<]+?>", "", result["contenido"])
             else:
                 return str(result)
-        
-        # Para formato JSON, devolver tal como viene
+
+        # JSON tal cual
         return result
-        
+
     except Exception as e:
-        print(f"Error en _request: {type(e).__name__}: {e}")
+        logger.error(
+            "doc_contenido request error (%s)",
+            type(e).__name__,
+            exc_info=settings.log_stacktraces,
+        )
         raise
+
 
 # ---------------------------------------------------------------------------
 # 10. Notas de seguridad
@@ -742,22 +782,21 @@ async def descargar_imagen(
     await client.aclose()
     return resultados_por_code
 
+# # ---------------------------------------------------------------------------
+# # __main__ – demostración rápida (CLI)
+# # ---------------------------------------------------------------------------
+# if __name__ == "__main__":
+#     async def demo():
+#         print(json.dumps(await medicamento(cn="608679"), indent=2, ensure_ascii=False)[:2000])
 
-# ---------------------------------------------------------------------------
-# __main__ – demostración rápida (CLI)
-# ---------------------------------------------------------------------------
-if __name__ == "__main__":
-    async def demo():
-        print(json.dumps(await medicamento(cn="608679"), indent=2, ensure_ascii=False)[:2000])
+#     # Maneja ejecución en entornos con loop activo (Jupyter) de forma segura
+#     try:
+#         asyncio.run(demo())
+#     except RuntimeError as exc:
+#         if "asyncio.run()" in str(exc):
+#             import nest_asyncio
 
-    # Maneja ejecución en entornos con loop activo (Jupyter) de forma segura
-    try:
-        asyncio.run(demo())
-    except RuntimeError as exc:
-        if "asyncio.run()" in str(exc):
-            import nest_asyncio
-
-            nest_asyncio.apply()
-            asyncio.get_event_loop().run_until_complete(demo())
-        else:
-            raise
+#             nest_asyncio.apply()
+#             asyncio.get_event_loop().run_until_complete(demo())
+#         else:
+#             raise

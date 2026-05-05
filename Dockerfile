@@ -1,35 +1,49 @@
-FROM python:3.12-slim
+FROM python:3.13-slim
 
-# Establecer variables de entorno para evitar advertencias de pip y asegurar salida sin buffer
-ENV PIP_ROOT_USER_ACTION=ignore
-ENV PYTHONUNBUFFERED=1
+# Evitar warnings y salida con buffer
+ENV PIP_ROOT_USER_ACTION=ignore \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 # Dependencias de sistema
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libmagic1 \
- && apt-get install -y --no-install-recommends jq \
+ && apt-get install -y --no-install-recommends \
+      libmagic1 jq curl ca-certificates wget \
  && rm -rf /var/lib/apt/lists/*
 
-# ----- 1 · Directorio raíz -----
+# ----- Crear usuario no-root y preparar directorios -----
+ARG APP_USER=appuser
+ARG APP_UID=10001
+RUN useradd -u ${APP_UID} -m -s /usr/sbin/nologin ${APP_USER} \
+ && mkdir -p /app /data /app/logs \
+ && chown -R ${APP_USER}:${APP_USER} /app /data \
+ && chmod 700 /data /app/logs
+
 WORKDIR /app
 
-# ----- 2 · Copiar archivos de configuración y dependencias -----
-COPY requirements.txt ./
-COPY pyproject.toml ./
+# ----- Copiar dependencias -----
+COPY requirements.txt pyproject.toml ./
 
-# ----- 3 · Instalar dependencias -----
+# ----- Instalar dependencias -----
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+ && pip install --no-cache-dir -r requirements.txt
 
-# ----- 3 · Copiamos código y spec -----
-COPY app ./app
-# COPY data ./data
+# ----- Copiar código -----
+COPY app/ ./app/
 
-# ----- 5 · Instalar la aplicación en modo editable -----
+# ----- Instalar en modo editable -----
 RUN pip install --no-cache-dir -e .
 
-# ----- 6 · Exponer y arrancar -----
+# ----- Exponer puerto -----
 EXPOSE 8000
+
+# ----- Cambiar a usuario no-root -----
+USER ${APP_USER}
+
+# ----- Healthcheck de la app -----
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=5 \
+  CMD wget -qO- http://127.0.0.1:8000/health || exit 1
+
 
 # 3A) Arranque de Uvicorn
 #    --app-dir /app indica a Uvicorn dónde buscar el módulo Python
@@ -39,8 +53,8 @@ EXPOSE 8000
 # Arranque con CLI leyendo UVICORN_HOST y PORT del entorno
 CMD ["sh", "-c", "\
   echo \"Arrancando en ${UVICORN_HOST}:${PORT}…\" && \
-  exec mcp_aemps up \
-    --uvicorn-host \"${UVICORN_HOST}\" \
-    --port         \"${PORT}\" \
-    --access-host  \"${ACCESS_HOST:-localhost}\"\
+    mcp_aemps up \
+      --uvicorn-host \"${UVICORN_HOST}\" \
+      --port         \"${PORT}\" \
+      --access-host  \"${ACCESS_HOST:-localhost}\" \
 "]

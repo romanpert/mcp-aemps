@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "aemps-cima-mcp": {
+    "mcp-aemps-cima": {
       "url": "http://localhost:8000/mcp",
       "env": {}
     }
