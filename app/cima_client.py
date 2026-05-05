@@ -1,28 +1,16 @@
 """cima_client.py
 ====================
-Cliente asíncrono minimalista para invocar **todas** las habilidades/endpoint
-oficiales de la API REST de CIMA (AEMPS) y devolver la respuesta *raw* (dict,
-list, str o None).
-
-Cada endpoint está expuesto como función independiente para poder reutilizarla
-fácilmente desde otros scripts o cuadernos Jupyter.
-
-• Probado con Python 3.12, httpx 0.27   —   2025‑05‑04.
-
-Ejemplo rápido (CLI):
-    python -m asyncio -c "import asyncio, cima_raw_client as c; print(asyncio.run(c.medicamento(cn='608679')))"
+Cliente asincrono para la API REST oficial de CIMA (AEMPS).
+Endpoints documentados en CIMA REST API v1.23.
+Transport: httpx (sin aiohttp).
 """
 from __future__ import annotations
 import base64
 import asyncio
 import json
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Literal, AsyncIterator, Union
 from datetime import datetime, timezone, timedelta
 from dateutil import parser
-from aiohttp import ClientResponseError, ClientSession, ClientTimeout
-
-AIOHTTP_TIMEOUT = ClientTimeout(total=15)
 
 from fastapi import HTTPException
 import logging
@@ -40,56 +28,39 @@ TIMEOUT = httpx.Timeout(15)
 TIPOS_PROBLEMA = {
     1: "Consultar Nota Informativa",
     2: "Suministro solo a hospitales",
-    3: "El médico prescriptor deberá determinar la posibilidad de utilizar otros tratamientos comercializados",
+    3: "El medico prescriptor debera determinar la posibilidad de utilizar otros tratamientos comercializados",
     4: "Desabastecimiento temporal",
-    5: "Existe/n otro/s medicamento/s con el mismo principio activo y para la misma vía de administración",
-    6: "Existe/n otro/s medicamento/s con los mismos principios activos y para la misma vía de administración",
+    5: "Existe/n otro/s medicamento/s con el mismo principio activo y para la misma via de administracion",
+    6: "Existe/n otro/s medicamento/s con los mismos principios activos y para la misma via de administracion",
     7: "Se puede solicitar como medicamento extranjero",
-    8: "Se recomienda restringir su prescripción reservándolo para casos en que no exista una alternativa apropiada",
-    9: "El titular de autorización de comercialización está realizando una distribución controlada al existir unidades limitadas"
+    8: "Se recomienda restringir su prescripcion reservandolo para casos en que no exista una alternativa apropiada",
+    9: "El titular de autorizacion de comercializacion esta realizando una distribucion controlada al existir unidades limitadas",
 }
 
-# Mapas de tipos
-_DOC_TYPE_MAP: dict[str, int] = {
-    'ft':  1,
-    'p':   2,
-    'ipe': 3,   # el valor real que devuelve CIMA
-    'ipt': 3,   # alias semántico para tu API
-}
+_DEFAULT_HEADERS = {"Accept": "application/json", "User-Agent": "mcp-aemps/1.0"}
 
-_DEFAULT_HEADERS = {'User-Agent': 'Mozilla/5.0'}
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 def _clean(params: Dict[str, Any] | None) -> Dict[str, Any] | None:
-    """Elimina claves con valor `None` para formar el querystring."""
     if not params:
         return None
     return {k: v for k, v in params.items() if v is not None}
 
 
-def _parse_fecha(valor):
-    """
-    Detecta si 'valor' es:
-      - int/float o str de dígitos (ms UNIX): lo convierte a ISO8601 UTC
-      - cualquier otra str: lo intenta parsear con dateutil
-    Si falla, devuelve el valor original.
-    """
-    # Timestamp UNIX en ms
+def _parse_fecha(valor: Any) -> Any:
+    """Convierte timestamps UNIX (ms) o strings de fecha a ISO8601."""
     if isinstance(valor, (int, float)) or (isinstance(valor, str) and valor.isdigit()):
         ms = int(valor)
-        # Construimos siempre desde 1970-01-01
         epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
         try:
-            # segundos = ms/1000
             dt = epoch + timedelta(milliseconds=ms)
             return dt.isoformat()
         except OverflowError:
             return valor
 
-    # Cualquier otra cadena
     if isinstance(valor, str):
         try:
             dt = parser.parse(valor)
@@ -99,11 +70,17 @@ def _parse_fecha(valor):
         except (ValueError, parser.ParserError):
             return valor
 
-    # Otros tipos (None, bool, etc.)
     return valor
 
-async def _request(method: str, path: str, *, params: Optional[Dict[str, Any]] = None,
-                   json_body: Optional[Any] = None, client: Optional[httpx.AsyncClient] = None) -> Optional[Any]:
+
+async def _request(
+    method: str,
+    path: str,
+    *,
+    params: Optional[Dict[str, Any]] = None,
+    json_body: Optional[Any] = None,
+    client: Optional[httpx.AsyncClient] = None,
+) -> Optional[Any]:
     owns_client = client is None
     if owns_client:
         client = httpx.AsyncClient(timeout=TIMEOUT)
@@ -113,13 +90,10 @@ async def _request(method: str, path: str, *, params: Optional[Dict[str, Any]] =
         full_url = f"{BASE_URL}/{path}"
 
         if logger.isEnabledFor(logging.DEBUG):
-            keys = sorted(list((clean_params or {}).keys()))
-            logger.debug("HTTP %s %s | params_keys=%s", method, path, keys)
-
-        DEFAULT_REQ_HEADERS = {"Accept": "application/json", "User-Agent": "Mozilla/5.0"}
+            logger.debug("HTTP %s %s | params_keys=%s", method, path, sorted(list((clean_params or {}).keys())))
 
         resp = await client.request(
-            method, full_url, params=clean_params, json=json_body, headers=DEFAULT_REQ_HEADERS
+            method, full_url, params=clean_params, json=json_body, headers=_DEFAULT_HEADERS
         )
 
         if logger.isEnabledFor(logging.DEBUG):
@@ -129,14 +103,11 @@ async def _request(method: str, path: str, *, params: Optional[Dict[str, Any]] =
         resp.raise_for_status()
 
         if not resp.content:
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug("HTTP %s %s | respuesta vacía", method, path)
             return None
 
         try:
             return resp.json()
         except (json.JSONDecodeError, ValueError):
-            # No exponer texto; si quieres, devuelve texto al llamador pero no lo loguees
             return resp.text
 
     except httpx.HTTPStatusError as e:
@@ -150,6 +121,7 @@ async def _request(method: str, path: str, *, params: Optional[Dict[str, Any]] =
     finally:
         if owns_client:
             await client.aclose()
+
 
 # ---------------------------------------------------------------------------
 # 1. Medicamentos
@@ -179,28 +151,24 @@ async def medicamentos(
     estuopsico: int | None = None,
     pagina: int | None = None,
 ) -> Any | None:
-    """GET /medicamentos – Lista paginada con múltiples filtros."""
-    return await _request(
-        "GET",
-        "medicamentos",
-        params=locals(),
-    )
+    """GET /medicamentos"""
+    return await _request("GET", "medicamentos", params=locals())
 
 
 async def medicamento(*, cn: str | None = None, nregistro: str | None = None) -> Any | None:
-    """GET /medicamento – Ficha completa del medicamento (cn o nregistro)."""
+    """GET /medicamento"""
     if not (cn or nregistro):
         raise ValueError("Se requiere 'cn' o 'nregistro'.")
     return await _request("GET", "medicamento", params=locals())
 
 
 # ---------------------------------------------------------------------------
-# 2. Búsqueda en ficha técnica
+# 2. Buscar en ficha tecnica (oficial POST)
 # ---------------------------------------------------------------------------
 async def buscar_en_ficha_tecnica(reglas: list[dict[str, Any]]) -> Any | None:
-    """POST /buscarEnFichaTecnica – Array de reglas: seccion, texto, contiene(0|1)."""
+    """POST /buscarEnFichaTecnica"""
     if not reglas:
-        raise ValueError("Debe proporcionar al menos una regla de búsqueda.")
+        raise ValueError("Debe proporcionar al menos una regla de busqueda.")
     return await _request("POST", "buscarEnFichaTecnica", json_body=reglas)
 
 
@@ -220,17 +188,17 @@ async def presentaciones(
     estuopsico: int | None = None,
     pagina: int | None = None,
 ) -> Any | None:
-    """GET /presentaciones – Listado de presentaciones."""
+    """GET /presentaciones"""
     return await _request("GET", "presentaciones", params=locals())
 
 
 async def presentacion(cn: str) -> Any | None:
-    """GET /presentacion/{cn} – Detalle de una presentación concreta."""
+    """GET /presentacion/{cn} — Detalle de una presentacion por codigo nacional."""
     return await _request("GET", f"presentacion/{cn}")
 
 
 # ---------------------------------------------------------------------------
-# 4. Descripción clínica (VMP/VMPP)
+# 4. Descripcion clinica (VMP/VMPP)
 # ---------------------------------------------------------------------------
 async def vmpp(
     *,
@@ -243,7 +211,7 @@ async def vmpp(
     modoArbol: int | None = None,
     pagina: int | None = None,
 ) -> Any | None:
-    """GET /vmpp – Devuelve VMP/VMPP filtrados."""
+    """GET /vmpp"""
     return await _request("GET", "vmpp", params=locals())
 
 
@@ -262,7 +230,7 @@ async def maestras(
     enuso: int | None = None,
     pagina: int | None = None,
 ) -> Any | None:
-    """GET /maestras – Catálogos de laboratorios, ATC, formas, etc."""
+    """GET /maestras — Catalogos: laboratorios, ATC, formas, etc."""
     return await _request("GET", "maestras", params=locals())
 
 
@@ -275,8 +243,8 @@ async def registro_cambios(
     nregistro: list[str] | None = None,
     metodo: str = "GET",
 ) -> Any:
-    # NO imponer fecha por defecto
-    payload_or_params = {}
+    """GET|POST /registroCambios"""
+    payload_or_params: dict = {}
     if fecha is not None:
         payload_or_params["fecha"] = fecha
     if nregistro is not None:
@@ -284,108 +252,146 @@ async def registro_cambios(
 
     if metodo.upper() == "POST":
         return await _request("POST", "registroCambios", json_body=payload_or_params)
-    else:
-        return await _request("GET", "registroCambios", params=payload_or_params)
+    return await _request("GET", "registroCambios", params=payload_or_params)
+
 
 # ---------------------------------------------------------------------------
-# 7 · Problemas de suministro (cliente)
+# 7. Problemas de suministro
+#
+# Fuentes oficiales:
+#   - CIMA REST API v1.23:
+#       GET /psuministro              → listado global paginado
+#       GET /psuministro/:codNacional → problemas por CN (respuesta basica)
+#   - CIMA REST API Problemas de Suministro v1.01 (AEMPS/Ministerio de Sanidad):
+#       GET /psuministro/v2/cn/{cn}       → por CN, respuesta enriquecida (estado, comerc)
+#       GET /psuministro/v2/dcp/{cod_dcp} → por DCP (descripcion clinica del producto)
+#       GET /psuministro/v2/dcpf/{cod_dcpf} → por DCPF (descripcion clinica con formato)
 # ---------------------------------------------------------------------------
-async def psuministro(
-    cn: str | None = None,
-    pagina: int = 1,
-    tamanioPagina: int = 10,
-) -> dict | list:
-    """
-    Cliente asíncrono para la API de Problemas de suministro:
-      - GET  /psuministro                → listado global (v1)
-      - GET  /psuministro/v2/cn/{cn}     → detalle por Código Nacional (v2)
-    """
-    # Selección de ruta y parámetros
-    if cn:
-        path, params = f"psuministro/v2/cn/{cn}", None
+
+def _enrich_psuministro(item: dict) -> None:
+    """Normaliza fechas y añade descripcion textual del tipo de problema."""
+    observ = item.get("observ", "").lower()
+    tipo_code = item.get("tipoProblemaSuministro")
+    if "sin problemas" in observ or tipo_code is None:
+        item["tipoProblemaSuministro_descripcion"] = "No existen problemas detectados"
+        item.setdefault("fecha_inicio", None)
+        item.setdefault("fecha_fin", None)
     else:
-        path, params = "psuministro", {"pagina": pagina, "tamanioPagina": tamanioPagina}
+        item["tipoProblemaSuministro_descripcion"] = TIPOS_PROBLEMA.get(tipo_code, "Desconocido")
+        if "fini" in item:
+            item["fecha_inicio"] = _parse_fecha(item.pop("fini"))
+        if "ffin" in item:
+            item["fecha_fin"] = _parse_fecha(item.pop("ffin"))
+    # Normalizar estado.* si existe
+    estado = item.get("estado")
+    if isinstance(estado, dict):
+        for k in list(estado):
+            estado[k] = _parse_fecha(estado[k])
 
-    url = f"{BASE_URL}/{path}"
-    async with ClientSession(timeout=AIOHTTP_TIMEOUT) as session:
-        try:
-            async with session.get(url, params=params, headers={"Accept": "application/json"}) as resp:
-                if resp.status == 400:
-                    raise HTTPException(status_code=400, detail="Parámetros inválidos")
-                
-                if resp.status == 404 and cn:
-                    return []  # detalle CN no existe
-                resp.raise_for_status()
-                raw = await resp.json()
-        except ClientResponseError as e:
-            raise HTTPException(status_code=e.status, detail="Error remoto CIMA")
 
-    def _enrich(item: dict) -> None:
-        # 1) Detectar “sin problemas” o ausencia de tipo
-        observ = item.get("observ", "").lower()
-        tipo_code = item.get("tipoProblemaSuministro")
-        if "sin problemas" in observ or tipo_code is None:
-            item["tipoProblemaSuministro_descripcion"] = "No existen problemas detectados"
-            item["fecha_inicio"] = None
-            item["fecha_fin"] = None
-        else:
-            # 2) Mapeo normal contra TIPOS_PROBLEMA
-            item["tipoProblemaSuministro_descripcion"] = TIPOS_PROBLEMA.get(
-                tipo_code,
-                "Desconocido"
-            )
-            # 3) Conversión de fechas (si vienen)
-            if "fini" in item:
-                item["fecha_inicio"] = _parse_fecha(item.pop("fini"))
-            if "ffin" in item:
-                item["fecha_fin"]    = _parse_fecha(item.pop("ffin"))
-
-    # Si es detalle CN → dict único
-    if cn:
-        _enrich(raw)
-        return raw
-
-    # Si es listado global → dict con "resultados"
-    resultados = raw.get("resultados", [])
-    for elem in resultados:
-        _enrich(elem)
-    raw["resultados"] = resultados
+async def psuministro_global(pagina: int = 1, tamanioPagina: int = 25) -> dict:
+    """GET /psuministro — listado global paginado (v1)."""
+    raw = await _request(
+        "GET", "psuministro",
+        params={"pagina": pagina, "tamanioPagina": tamanioPagina},
+    )
+    if raw is None:
+        return {"totalFilas": 0, "pagina": pagina, "tamanioPagina": tamanioPagina, "resultados": []}
+    for item in raw.get("resultados", []):
+        _enrich_psuministro(item)
     return raw
 
 
+async def psuministro_cn_v1(cn: str) -> Any:
+    """GET /psuministro/:codNacional — por CN, respuesta basica (v1)."""
+    raw = await _request("GET", f"psuministro/{cn}")
+    if raw is None:
+        return []
+    items = raw if isinstance(raw, list) else [raw]
+    for item in items:
+        _enrich_psuministro(item)
+    return items
+
+
+async def psuministro_cn(cn: str) -> dict:
+    """
+    GET /psuministro/v2/cn/{cn} — por CN, respuesta enriquecida (v2).
+    Incluye estado de la presentacion (aut/susp/rev) y comerc.
+    Si v2 falla con 404 hace fallback al endpoint v1.
+    """
+    try:
+        raw = await _request("GET", f"psuministro/v2/cn/{cn}")
+        if raw is None:
+            return {}
+        _enrich_psuministro(raw)
+        raw["_fuente"] = "v2"
+        return raw
+    except HTTPStatusError as e:
+        if e.response.status_code == 404:
+            # fallback a v1
+            items = await psuministro_cn_v1(cn)
+            return {"cn": cn, "resultados_v1": items, "_fuente": "v1_fallback"}
+        raise
+
+
+async def psuministro_dcp(cod_dcp: str) -> dict:
+    """
+    GET /psuministro/v2/dcp/{cod_dcp}
+    Devuelve presentaciones comercializadas y cuantas tienen problemas de suministro
+    para ese DCP (descripcion clinica del producto).
+    """
+    raw = await _request("GET", f"psuministro/v2/dcp/{cod_dcp}")
+    return raw or {}
+
+
+async def psuministro_dcpf(cod_dcpf: str) -> dict:
+    """
+    GET /psuministro/v2/dcpf/{cod_dcpf}
+    Devuelve presentaciones comercializadas y cuantas tienen problemas de suministro
+    para ese DCPF (descripcion clinica del producto con formato).
+    """
+    raw = await _request("GET", f"psuministro/v2/dcpf/{cod_dcpf}")
+    return raw or {}
+
+
+async def psuministro(
+    cn: str | None = None,
+    pagina: int = 1,
+    tamanioPagina: int = 25,
+) -> dict | list:
+    """
+    Funcion unificada de compatibilidad:
+    - Sin cn: llama a psuministro_global (v1)
+    - Con cn: llama a psuministro_cn (v2 con fallback v1)
+    """
+    if cn:
+        return await psuministro_cn(cn)
+    return await psuministro_global(pagina=pagina, tamanioPagina=tamanioPagina)
+
+
 # ---------------------------------------------------------------------------
-# 8. Documentos segmentados – Secciones (cliente CIMA “puro”)
+# 8. Documentos segmentados — Secciones
 # ---------------------------------------------------------------------------
 async def doc_secciones(
     tipo_doc: int,
     *,
     nregistro: str,
 ) -> Optional[List[Dict[str, Any]]]:
-    """
-    GET docSegmentado/secciones/{tipo_doc}
-    Devuelve los metadatos de las secciones para un tipo de documento y un medicamento.
-
-    - CIMA SOLO acepta `nregistro` como parámetro.
-    - Se asume que `nregistro` YA está normalizado en capas superiores.
-    """
+    """GET /docSegmentado/secciones/{tipo_doc}"""
     if not nregistro:
         raise ValueError("Se requiere 'nregistro'.")
-
-    params = {"nregistro": nregistro}
 
     try:
         result = await _request(
             "GET",
             f"docSegmentado/secciones/{tipo_doc}",
-            params=params,
+            params={"nregistro": nregistro},
         )
 
         if result is None:
             return []
-
         if isinstance(result, list):
             return result
-
         if isinstance(result, dict):
             return [result]
 
@@ -393,16 +399,12 @@ async def doc_secciones(
         return []
 
     except Exception as e:
-        logger.error(
-            "doc_secciones falló (%s)",
-            type(e).__name__,
-            exc_info=settings.log_stacktraces,
-        )
+        logger.error("doc_secciones fallo (%s)", type(e).__name__, exc_info=settings.log_stacktraces)
         raise
 
 
 # ---------------------------------------------------------------------------
-# 9. Documentos segmentados – Contenido (cliente CIMA)
+# 9. Documentos segmentados — Contenido
 # ---------------------------------------------------------------------------
 async def doc_contenido(
     tipo_doc: int,
@@ -411,85 +413,44 @@ async def doc_contenido(
     seccion: str | None = None,
     format: str = "json",
 ) -> Any | None:
-    """
-    Obtiene contenido de documentos segmentados desde CIMA.
-
-    - tipo_doc: 1 (Ficha técnica) o 2 (Prospecto)
-    - format: "json" (default), "html" o "txt"
-    - Se asume que `nregistro` YA está normalizado.
-    """
+    """GET /docSegmentado/contenido/{tipo_doc}"""
     if not nregistro:
         raise ValueError("Se requiere 'nregistro'.")
 
     if tipo_doc not in [1, 2]:
         raise ValueError(f"tipo_doc debe ser 1 o 2, recibido: {tipo_doc}")
 
-    params = _clean({
-        "nregistro": nregistro,
-        "seccion":   seccion,
-    })
-
-    if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(
-            "doc_contenido tipo_doc=%s | nregistro=%s | seccion=%s | format=%s",
-            tipo_doc,
-            nregistro,
-            seccion,
-            format,
-        )
+    params = _clean({"nregistro": nregistro, "seccion": seccion})
 
     try:
-        # Pedimos siempre JSON a CIMA
-        result = await _request(
-            method="GET",
-            path=f"docSegmentado/contenido/{tipo_doc}",
-            params=params,
-        )
+        result = await _request("GET", f"docSegmentado/contenido/{tipo_doc}", params=params)
 
         if format == "html":
             if isinstance(result, list) and result:
-                html_content = ""
-                for sec in result:
-                    if isinstance(sec, dict) and "contenido" in sec:
-                        html_content += sec["contenido"]
-                return html_content
+                return "".join(sec.get("contenido", "") for sec in result if isinstance(sec, dict))
             elif isinstance(result, dict) and "contenido" in result:
                 return result["contenido"]
-            else:
-                return str(result)
+            return str(result)
 
         if format == "txt":
             import re as _re
-
             if isinstance(result, list) and result:
-                txt_content = ""
+                parts = []
                 for sec in result:
                     if isinstance(sec, dict):
                         if "titulo" in sec:
-                            txt_content += f"{sec['titulo']}\n"
+                            parts.append(sec["titulo"])
                         if "contenido" in sec:
-                            clean_content = _re.sub(
-                                "<[^<]+?>",
-                                "",
-                                sec["contenido"],
-                            )
-                            txt_content += f"{clean_content}\n\n"
-                return txt_content.strip()
+                            parts.append(_re.sub("<[^<]+?>", "", sec["contenido"]))
+                return "\n\n".join(parts).strip()
             elif isinstance(result, dict) and "contenido" in result:
-                import re as _re
                 return _re.sub("<[^<]+?>", "", result["contenido"])
-            else:
-                return str(result)
+            return str(result)
 
-        # JSON tal cual
         return result
 
     except Exception as e:
-        logger.error(
-            "doc_contenido request error (%s)",
-            type(e).__name__,
-            exc_info=settings.log_stacktraces,
-        )
+        logger.error("doc_contenido error (%s)", type(e).__name__, exc_info=settings.log_stacktraces)
         raise
 
 
@@ -497,306 +458,77 @@ async def doc_contenido(
 # 10. Notas de seguridad
 # ---------------------------------------------------------------------------
 async def notas(nregistro: str) -> Any | None:
-    """
-    GET /notas?nregistro={nregistro} – Listado de notas de seguridad
-    GET /notas/{nregistro}             – Detalle de notas de seguridad
-    """
+    """GET /notas?nregistro={nregistro} o GET /notas/{nregistro}"""
     data = await _request("GET", "notas", params={"nregistro": nregistro})
     if data is None or (isinstance(data, dict) and not data):
         return await _request("GET", f"notas/{nregistro}")
     return data
 
+
 # ---------------------------------------------------------------------------
-# 11. Materiales informativos (client CIMA unificado)
+# 11. Materiales informativos
 # ---------------------------------------------------------------------------
 async def materiales(nregistro: Union[str, List[str]]) -> Any | None:
-    """
-    - Si recibe un str, llama a GET /materiales?nregistro={nregistro} y,
-      si no obtiene nada, GET /materiales/{nregistro}. Devuelve
-      {'nregistro': ..., 'materiales': List[Material]} o None.
-    - Si recibe lista, itera y devuelve List[{'nregistro', 'materiales'}] o None.
-    """
+    """GET /materiales?nregistro={nregistro} o GET /materiales/{nregistro}"""
     async def _fetch_one(nr: str) -> list | None:
         try:
             data = await _request("GET", "materiales", params={"nregistro": nr})
-            if not data:  # si es None o lista vacía
+            if not data:
                 data = await _request("GET", f"materiales/{nr}")
-            # Ahora data puede ser:
-            #  - lista de Material (si el endpoint devolvió lista)
-            #  - dict (si CIMA devuelve un único objeto)
             if isinstance(data, dict):
-                # si viene nested en “materiales”
                 if "materiales" in data and isinstance(data["materiales"], list):
                     return data["materiales"]
-                # si es ya un Material, lo envuelvo en lista
                 return [data]
-            # si es lista, la devuelvo (ó None si vacía)
             return data or None
         except HTTPStatusError as e:
             if e.response.status_code == 404:
                 return None
             raise
 
-    # caso múltiple
     if isinstance(nregistro, list):
         tareas = [_fetch_one(nr) for nr in nregistro]
         respuestas = await asyncio.gather(*tareas, return_exceptions=True)
         resultados = []
         for nr, res in zip(nregistro, respuestas):
             if isinstance(res, Exception):
-                # tratar el error si es necesario (o hacer skip)
                 continue
             if res:
                 resultados.append({"nregistro": nr, "materiales": res})
         return resultados or None
 
-    # caso único
     mat = await _fetch_one(nregistro)
     return {"nregistro": nregistro, "materiales": mat} if mat else None
 
 
 # ---------------------------------------------------------------------------
-# 12. Recuperación de HTML completo (FT / Prospecto)
+# 12. HTML completo (FT / Prospecto)
 # ---------------------------------------------------------------------------
-
 async def get_html(
     tipo: Literal["ft", "p"],
     nregistro: str,
-    filename: str
+    filename: str,
 ) -> AsyncIterator[bytes]:
-    """
-    Streaming de bytes desde https://cima.aemps.es/cima/dochtml/{tipo}/{nregistro}/{filename},
-    pero haciendo raise_for_status ANTES de devolver los datos.
-    """
+    """Streaming desde https://cima.aemps.es/cima/dochtml/{tipo}/{nregistro}/{filename}"""
     url = f"{HTML_BASE_URL}/dochtml/{tipo}/{nregistro}/{filename}"
     client = httpx.AsyncClient(timeout=TIMEOUT, headers=_DEFAULT_HEADERS)
     try:
         resp = await client.get(url, follow_redirects=True)
-        # lanzamos aquí la excepción si es 4xx o 5xx
         resp.raise_for_status()
-        # sólo si OK, devolvemos el streaming
         async for chunk in resp.aiter_bytes():
             yield chunk
     finally:
         await client.aclose()
 
+
 async def get_html_bytes(
     tipo: Literal["ft", "p"],
     nregistro: str,
-    filename: str
+    filename: str,
 ) -> bytes:
-    """
-    Descarga completa en bytes desde https://cima.aemps.es/cima/dochtml/{tipo}/{nregistro}/{filename}
-    """
+    """Descarga completa en bytes desde cima.aemps.es/cima/dochtml/..."""
     url = f"{HTML_BASE_URL}/dochtml/{tipo}/{nregistro}/{filename}"
     async with httpx.AsyncClient(timeout=TIMEOUT, headers=_DEFAULT_HEADERS) as client:
         resp = await client.get(url, follow_redirects=True)
         resp.raise_for_status()
         return resp.content
 
-# ---------------------------------------------------------------------------
-# 13. Descargar documentos (con opción only_url o texto + cleanup)
-# ---------------------------------------------------------------------------
-def extract_text_from_pdf(pdf_path: Path) -> str:
-    """Extrae todo el texto de un PDF usando PyMuPDF."""
-    import fitz  # PyMuPDF
-    doc = fitz.open(str(pdf_path))
-    text_blocks = []
-    for page in doc:
-        text_blocks.append(page.get_text())
-    doc.close()
-    return "\n".join(text_blocks)
-
-
-async def download_docs(
-    cn: str | None = None,
-    nregistro: str | None = None,
-    tipos: list[str] = ("ft", "p", "ipt"),
-    base_dir: str = "data/pdf",
-    timeout: int = 15,
-    only_url: bool = False,          # si True devuelve solo URLs
-    with_text: bool = False,         # si True descarga, extrae texto y borra PDF
-) -> List[dict] | List[str]:
-    """
-    - only_url=True: devuelve List[str] de URLs oficiales.
-    - with_text=True: descarga, extrae texto, borra el PDF y devuelve List[dict] con keys: url, text.
-    - ambos flags False: descarga y devuelve List[str] de rutas locales.
-    """
-    med = await medicamento(cn=cn, nregistro=nregistro)
-    if not isinstance(med, dict):
-        return []
-
-    docs = med.get("data", {}).get("docs") or med.get("docs") or []
-    if not docs:
-        return []
-
-    # Sólo URLs
-    if only_url:
-        urls: List[str] = []
-        for tipo in tipos:
-            code = _DOC_TYPE_MAP.get(tipo.lower())
-            if not code:
-                continue
-            for doc in docs:
-                if doc.get("tipo") == code and doc.get("url"):
-                    urls.append(doc["url"])
-        return urls
-
-    # Descarga y/o extracción de texto
-    results = []
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        for tipo in tipos:
-            code = _DOC_TYPE_MAP.get(tipo.lower())
-            if not code:
-                continue
-
-            dest_dir = Path(base_dir) / tipo.lower()
-            dest_dir.mkdir(parents=True, exist_ok=True)
-
-            for doc in docs:
-                if doc.get("tipo") == code and doc.get("url"):
-                    url = doc["url"]
-                    resp = await client.get(url, follow_redirects=True)
-                    resp.raise_for_status()
-
-                    filename = Path(url).name
-                    local_path = dest_dir / filename
-                    local_path.write_bytes(resp.content)
-
-                    if with_text:
-                        # Extrae texto y borra el PDF local
-                        text = extract_text_from_pdf(local_path)
-                        results.append({"url": url, "text": text})
-                        try:
-                            local_path.unlink()
-                        except Exception:
-                            pass
-                    else:
-                        results.append(str(local_path))
-
-    return results
-
-# ---------------------------------------------------------------------------
-# 13b. Descargar sólo IPT (envoltorio)
-# ---------------------------------------------------------------------------
-async def download_ipt(
-    cn: str | None = None,
-    nregistro: str | None = None,
-    timeout: int = 15,
-    only_url: bool = False,
-    with_text: bool = False,
-) -> List[dict] | List[str]:
-    return await download_docs(
-        cn=cn,
-        nregistro=nregistro,
-        tipos=["ipt"],
-        base_dir="data/pdf/ipt",
-        timeout=timeout,
-        only_url=only_url,
-        with_text=with_text,
-    )
-
-# ---------------------------------------------------------------------------
-# 14. Función interna descargar_imagen con only_url y with_base64
-# ---------------------------------------------------------------------------
-# Tipos de imagen válidos
-_VALID_IMAGE_TYPES = {"formafarmac", "materialas"}
-
-async def descargar_imagen(
-    cn: List[str] | None = None,
-    nregistro: List[str] | None = None,
-    tipos: List[str] = ("formafarmac", "materialas"),
-    base_dir: str = "data/img",
-    timeout: int = 15,
-    only_url: bool = False,
-    with_base64: bool = False,
-) -> Dict[str, List[Union[str, Dict[str, Any]]]]:
-    """
-    Descarga imágenes y las agrupa por CN o NRegistro.
-
-    - only_url=True,  with_base64=False: devuelve solo URLs (List[str] si solo url o List[dict]{'url'}).
-    - only_url=False, with_base64=False: descarga localmente y devuelve rutas (List[str]).
-    - only_url=False, with_base64=True: devuelve solo base64 (List[dict]{'base64'}).
-    - only_url=True,  with_base64=True: devuelve url y base64 (List[dict]{'url','base64'}).
-    """
-    if not (cn or nregistro):
-        return {}
-
-    tipos_validos = [t.lower() for t in tipos if t.lower() in _VALID_IMAGE_TYPES]
-    if not tipos_validos:
-        return {}
-
-    client = httpx.AsyncClient(timeout=timeout)
-    resultados_por_code: Dict[str, List[Union[str, Dict[str, Any]]]] = {}
-
-    async def _procesar_med(code: str, med: dict):
-        fotos = med.get("data", {}).get("fotos", []) or med.get("fotos", [])
-        lista_imagenes: List[Union[str, Dict[str, Any]]] = []
-        for foto in fotos:
-            tipo = foto.get("tipo")
-            url_thumb = foto.get("url")
-            if tipo in tipos_validos and url_thumb:
-                url_full = url_thumb.replace("/thumbnails/", "/full/")
-
-                # only_url sin base64: devolvemos solo URL
-                if only_url and not with_base64:
-                    lista_imagenes.append(url_full)
-                    continue
-
-                # descargamos el contenido
-                resp = await client.get(url_full, follow_redirects=True)
-                resp.raise_for_status()
-                content = resp.content
-
-                # solo local sin base64
-                if not only_url and not with_base64:
-                    dest_dir = Path(base_dir) / tipo
-                    dest_dir.mkdir(parents=True, exist_ok=True)
-                    local_path = dest_dir / Path(url_full).name
-                    local_path.write_bytes(content)
-                    lista_imagenes.append(str(local_path))
-                    continue
-
-                # codificar en base64 para los casos restantes
-                b64 = base64.b64encode(content).decode("ascii")
-
-                # only base64
-                if not only_url and with_base64:
-                    lista_imagenes.append({"base64": b64})
-                # both url + base64
-                elif only_url and with_base64:
-                    lista_imagenes.append({"url": url_full, "base64": b64})
-
-        resultados_por_code[code] = lista_imagenes
-
-    for code in cn or []:
-        med = await medicamento(cn=code)
-        if isinstance(med, dict):
-            await _procesar_med(code, med)
-
-    for code in nregistro or []:
-        med = await medicamento(nregistro=code)
-        if isinstance(med, dict):
-            await _procesar_med(code, med)
-
-    await client.aclose()
-    return resultados_por_code
-
-# # ---------------------------------------------------------------------------
-# # __main__ – demostración rápida (CLI)
-# # ---------------------------------------------------------------------------
-# if __name__ == "__main__":
-#     async def demo():
-#         print(json.dumps(await medicamento(cn="608679"), indent=2, ensure_ascii=False)[:2000])
-
-#     # Maneja ejecución en entornos con loop activo (Jupyter) de forma segura
-#     try:
-#         asyncio.run(demo())
-#     except RuntimeError as exc:
-#         if "asyncio.run()" in str(exc):
-#             import nest_asyncio
-
-#             nest_asyncio.apply()
-#             asyncio.get_event_loop().run_until_complete(demo())
-#         else:
-#             raise

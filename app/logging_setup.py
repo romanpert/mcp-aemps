@@ -1,5 +1,10 @@
-# mcp_aemps/app/logging_setup.py
-# Logging configuration extracted from mcp_aemps_server.py
+# app/logging_setup.py
+"""Logging configuration — plain structured stdlib logging.
+
+Community Edition: console + rotating file handler with gzip compression.
+No OTel coupling. Enterprise editions add OTel correlation by replacing
+the formatter through a startup hook.
+"""
 from __future__ import annotations
 
 import gzip
@@ -11,16 +16,7 @@ from pathlib import Path
 
 from app.config import settings
 
-
-class SafeOTELFormatter(logging.Formatter):
-    """Formatter that safely handles missing OTel trace/span attributes."""
-
-    def format(self, record: logging.LogRecord) -> str:
-        if not hasattr(record, "otelTraceID"):
-            record.otelTraceID = "-"
-        if not hasattr(record, "otelSpanID"):
-            record.otelSpanID = "-"
-        return super().format(record)
+_LOG_FORMAT = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 
 
 def _namer(name: str) -> str:
@@ -34,10 +30,6 @@ def _rotator(source: str, dest: str) -> None:
 
 
 def configure_logging() -> logging.Logger:
-    """Configure root logger with console + rotating file handlers.
-
-    Returns the application logger ``mcp.aemps``.
-    """
     log_dir = Path(settings.log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "mcp_aemps.log"
@@ -49,16 +41,12 @@ def configure_logging() -> logging.Logger:
         root.removeHandler(h)
     root.setLevel(log_level)
 
-    fmt = SafeOTELFormatter(
-        "%(asctime)s | %(levelname)s | trace=%(otelTraceID)s span=%(otelSpanID)s | %(message)s"
-    )
+    fmt = logging.Formatter(_LOG_FORMAT)
 
-    # Console handler
     console = logging.StreamHandler()
     console.setFormatter(fmt)
     root.addHandler(console)
 
-    # Uvicorn loggers: propagate to root, suppress duplicate handlers
     for name in ("uvicorn", "uvicorn.error"):
         uv = logging.getLogger(name)
         uv.handlers = []
@@ -67,7 +55,6 @@ def configure_logging() -> logging.Logger:
     uv_access.handlers = []
     uv_access.propagate = False
 
-    # Rotating file handler (daily, gzip-compressed)
     file_handler = TimedRotatingFileHandler(
         filename=str(log_file),
         when="midnight",

@@ -1,10 +1,4 @@
 # ---------------------------------------------------------------------------
-#   Constantes internas
-# ---------------------------------------------------------------------------
-_IMG_FULL_TYPES = ['formafarmac', 'materialas']
-_DOC_TYPE_MAP   = {'ft':  1, 'p': 2, 'ipt': 3}
-
-# ---------------------------------------------------------------------------
 # Prompt helper
 # ---------------------------------------------------------------------------
 MCP_AEMPS_SYSTEM_PROMPT = (
@@ -44,10 +38,14 @@ Eres un **agente farmacéutico digital** en España con acceso a las siguientes 
    • `registro_cambios(fecha="dd/mm/yyyy", nregistro, metodo="GET"|"POST")`  
    - Historial de altas, bajas y modificaciones desde una fecha dada.
 
-8. **Problemas de suministro**  
-   • `problemas_suministro(cn=[...])`  
-   - Sin parámetros: paginado global.  
-   - Con uno o varios CN: paraleliza llamadas y devuelve `{cn: resultado}`.
+8. **Problemas de suministro**
+   • `problemas_suministro(cn=[...])`
+   - Sin parámetros: paginado global.
+   - Con uno o varios CN: paraleliza llamadas y devuelve `{cn: resultado}` (v2 con fallback v1).
+   • `problemas_suministro_dcp(cod_dcp)`
+   - Presentaciones comercializadas y con problemas de suministro para un DCP (descripción clínica del producto).
+   • `problemas_suministro_dcpf(cod_dcpf)`
+   - Presentaciones comercializadas y con problemas de suministro para un DCPF (descripción clínica con forma farmacéutica).
 
 9. **Documentos segmentados**  
    • `doc_secciones(tipo_doc=1-4, nregistro, cn)` → metadatos de secciones.  
@@ -72,22 +70,16 @@ Eres un **agente farmacéutico digital** en España con acceso a las siguientes 
       - `html_prospecto(nregistro, filename)`  
     - Para varios registros devuelve `{nregistro: html_str}`, para uno StreamingResponse.
 
-13. **Descargar Informe de Posicionamiento Terapéutico (IPT)**  
-    • `descargar_ipt(cn=[...], nregistro=[...])`  
-    - Devuelve lista de rutas de archivos IPT, aplana resultados de múltiples llamadas.
-
-14. **Identificar medicamento en Presentaciones.xls**  
-    • `identificar_medicamento(nregistro, cn, nombre)`  
-    - Busca en el Excel, normaliza texto y, si no hay coincidencia, usa similitud difusa para devolver hasta 10 resultados.
 
 ---
 ## Flujo recomendado
 
-1. Para ficheros o imágenes, primero usa **`descargar_documentos`** o **`descargar_imagenes`** (herramientas MCP genéricas).  
-2. Para datos estructurados, emplea la herramienta específica (por ejemplo, `obtener_medicamento`, `listar_presentaciones`, etc.).  
-3. Para contenido segmentado, usa `doc_secciones` y `doc_contenido`.  
-4. Para búsquedas de texto, usa `buscar_en_ficha_tecnica`.  
-5. Para listados con filtros, usa `buscar_medicamentos` o `buscar_vmpp`.
+1. Para datos estructurados, usa la herramienta especifica (`obtener_medicamento`, `listar_presentaciones`, etc.).
+2. Para contenido segmentado de fichas y prospectos, usa `doc_secciones` y `doc_contenido`.
+3. Para busquedas de texto dentro de fichas tecnicas, usa `buscar_en_ficha_tecnica`.
+4. Para listados con filtros, usa `buscar_medicamentos` o `buscar_vmpp`.
+5. Para alertas de suministro por CN usa `problemas_suministro`; por DCP/DCPF usa `problemas_suministro_dcp` / `problemas_suministro_dcpf`.
+6. Para notas de seguridad y cambios recientes, usa `listar_notas`, `registro_cambios`.
 
 ---
 ## Pautas para las respuestas
@@ -268,6 +260,42 @@ Priorizable usarlo por Código Nacional (cn).
 - `tamanioPagina` (int, opcional, defecto=10): número de elementos por página (sólo sin `cn`). Rango 1–100.  
 """
 
+problemas_suministro_dcp_description = """
+Devuelve las presentaciones comercializadas **y** las que tienen problemas de suministro activos para un **DCP** (Descripción Clínica del Producto).
+
+**Uso**
+```
+GET /problemas-suministro/dcp/{cod_dcp}
+```
+
+**Parámetro**
+- `cod_dcp` (str, **requerido**): código DCP asignado por AEMPS (identificador del principio activo + dosis + forma farmacéutica).
+
+**Respuesta**
+- `comercializados`: presentaciones comercializadas para ese DCP.
+- `con_psuministro`: presentaciones con problema de suministro activo.
+
+**Fuente**: AEMPS CIMA — `GET /psuministro/v2/dcp/{cod_dcp}` (API Problemas Suministro v1.01)
+"""
+
+problemas_suministro_dcpf_description = """
+Devuelve las presentaciones comercializadas **y** las que tienen problemas de suministro activos para un **DCPF** (Descripción Clínica del Producto con Forma Farmacéutica).
+
+**Uso**
+```
+GET /problemas-suministro/dcpf/{cod_dcpf}
+```
+
+**Parámetro**
+- `cod_dcpf` (str, **requerido**): código DCPF asignado por AEMPS.
+
+**Respuesta**
+- `comercializados`: presentaciones comercializadas para ese DCPF.
+- `con_psuministro`: presentaciones con problema de suministro activo.
+
+**Fuente**: AEMPS CIMA — `GET /psuministro/v2/dcpf/{cod_dcpf}` (API Problemas Suministro v1.01)
+"""
+
 doc_secciones_description = """
 Lista los metadatos de secciones disponibles para un tipo de documento y medicamento indicados.
 
@@ -442,105 +470,6 @@ GET /doc-html/p/{nregistro}/{filename}
 **Parámetros**  
 - `nregistro` (str, **requerido**): número de registro AEMPS.  
 - `filename` (str, **requerido**): nombre de archivo HTML (p.ej. "Prospecto.html" o sección específica).
-"""
-
-descargar_ipt_description = """
-Descarga los Informes de Posicionamiento Terapéutico (IPT) en PDF para uno o varios medicamentos.
-
-**Uso**  
-- Envía uno o varios parámetros `cn` o `nregistro` como consulta GET:  
-  - Ejemplo único por CN: `GET /descargar-ipt?cn=123456`  
-  - Ejemplo múltiple por CN: `GET /descargar-ipt?cn=123&cn=456`  
-  - Ejemplo único por NRegistro: `GET /descargar-ipt?nregistro=AB-2025`  
-  - Ejemplo múltiple por NRegistro: `GET /descargar-ipt?nregistro=AB-2025&nregistro=CD-2025`  
-- Opcional: `timeout` (int): tiempo de espera en segundos para cada descarga (por defecto 15).
-
-**Parámetros**  
-- `cn` (List[str], opcional): uno o varios Códigos Nacionales (repetir por cada valor).  
-- `nregistro` (List[str], opcional): uno o varios Números de Registro (repetir por cada valor).  
-- **Requerido**: al menos uno de `cn` o `nregistro`.  
-- `timeout` (int, opcional): timeout en segundos.
-
-**Ejemplos**  
-```
-GET /descargar-ipt?cn=123&cn=456&timeout=20
-GET /descargar-ipt?nregistro=AB-2025&nregistro=CD-2025
-GET /descargar-ipt?cn=123&nregistro=AB-2025
-```
-"""
-
-identificar_medicamento_description = """
-Identifica hasta 10 presentaciones de medicamentos usando filtros y paginación.
-
-**Uso**  
-Envía los filtros como parámetros de consulta en un GET a `/identificar-medicamento`:
-- `nregistro` (str): coincidencia exacta del Nº Registro AEMPS.
-- `cn`        (str): coincidencia exacta del Código Nacional.
-- `nombre`    (str): coincidencia parcial o difusa en el nombre de la presentación.
-- `laboratorio`   (str): coincidencia parcial en el laboratorio fabricante.
-- `atc`            (str): coincidencia parcial en el código ATC.
-- `estado`         (str): coincidencia parcial en el estado.
-- `comercializado` (bool): `true`/`false` para filtrar por comercializado.
-- `pagina`    (int, ≥1; opcional): página de resultados (por defecto 1).
-- `page_size` (int, 1–100; opcional): tamaño de página (por defecto 10).
-
-**Parámetros obligatorios**  
-- Al menos uno de `nregistro`, `cn` o `nombre`.
-
-**Comportamiento**  
-- Filtra el fichero `Presentaciones.xls` según los parámetros.
-- Para `nombre`, aplica búsqueda difusa si no hay coincidencias directas.
-- Devuelve hasta `page_size` resultados paginados.
-"""
-
-nomenclator_description = """
-Realiza búsquedas avanzadas en el Nomenclátor de facturación de productos farmacéuticos.
-
-**Uso**  
-- Envía los filtros como parámetros de consulta en un GET a `/nomenclator`.
-- Si no se especifica ningún filtro, devuelve todos los registros (paginados).
-- `pagina` (int; ≥1) indica la página de resultados (por defecto 1).
-- `page_size` (int; 1–100) indica el número de resultados por página (por defecto 10).
-
-**Parámetros disponibles** (todos opcionales):
-- `codigo_nacional` (str): coincidencia exacta del Código Nacional.
-- `nombre_producto` (str): coincidencia parcial en el nombre del producto (case-insensitive).
-- `tipo_farmaco` (str): coincidencia parcial en el tipo de fármaco.
-- `principio_activo` (str): coincidencia parcial en el principio activo o asociación.
-- `codigo_laboratorio` (str): coincidencia exacta del código de laboratorio ofertante.
-- `nombre_laboratorio` (str): coincidencia parcial en el nombre del laboratorio.
-- `estado` (str): coincidencia parcial en el estado (ej. "ALTA", "BAJA").
-- `fecha_alta_desde` (str): fecha de alta ≥ dd/mm/yyyy.
-- `fecha_alta_hasta` (str): fecha de alta ≤ dd/mm/yyyy.
-- `fecha_baja_desde` (str): fecha de baja ≥ dd/mm/yyyy.
-- `fecha_baja_hasta` (str): fecha de baja ≤ dd/mm/yyyy.
-- `aportacion_beneficiario` (str): coincidencia parcial en la aportación del beneficiario.
-- `precio_min_iva` (float): precio venta público mínimo con IVA.
-- `precio_max_iva` (float): precio venta público máximo con IVA.
-- `agrupacion_codigo` (str): coincidencia exacta del código de agrupación homogénea.
-- `agrupacion_nombre` (str): coincidencia parcial en el nombre de agrupación homogénea.
-- `diagnostico_hospitalario` (bool): `true` para sólo diagnóstico hospitalario.
-- `larga_duracion` (bool): `true` para tratamiento de larga duración.
-- `especial_control` (bool): `true` para especial control médico.
-- `medicamento_huerfano` (bool): `true` para medicamento huérfano.
-"""
-
-descargar_imagenes_description = """
-Descarga imágenes en alta resolución de la forma farmacéutica y/o del material de caja para uno o varios medicamentos.
-
-**Uso**  
-Envía los parámetros como consulta GET al endpoint `/descargar-imagenes`:
-- `cn` (list[str], **requerido**): uno o varios Códigos Nacionales (`?cn=123&cn=456`).
-- `tipos` (list[str], opcional): colecciones a descargar. Valores permitidos:
-  - `formafarmac`  (forma farmacéutica)
-  - `materialas`   (material de caja/packaging)
-  (por defecto: ambos).
-- `timeout` (int, opcional): tiempo de espera en segundos para cada descarga individual (por defecto 15).
-
-**Ejemplo**  
-```
-GET /descargar-imagenes?cn=762540&cn=720186&tipos=formafarmac&timeout=10
-```
 """
 
 system_info_prompt_description = """

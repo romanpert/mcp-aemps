@@ -1,42 +1,67 @@
 [build-system]
-requires = ["poetry-core>=1.0.0"]
+requires = ["poetry-core>=2.0.0"]
 build-backend = "poetry.core.masonry.api"
 
-[tool.poetry]
-name = "mcp_aemps"
+[project]
+name = "mcp-aemps"
 version = "0.1.0"
-description = "Servidor FastAPI-MCP para AEMPS CIMA + CLI de arranque / Docker"
-authors = ["Román Pérez Dumpert <roman.p98@gmail.com>"]
+description = "Open-source MCP server for the Spanish AEMPS CIMA pharmaceutical registry"
+authors = [
+  { name = "Román Pérez Dumpert", email = "roman.p98@gmail.com" }
+]
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+readme = "README.md"
+requires-python = ">=3.11,<4.0"
+keywords = ["mcp", "aemps", "cima", "pharmaceutical", "healthcare", "regulatory", "fastapi", "claude", "llm"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Web Environment",
+  "Framework :: FastAPI",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Healthcare Industry",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Medical Science Apps.",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Typing :: Typed",
+]
+dependencies = [
+  "fastapi==0.116.2",
+  "fastapi-mcp==0.4.0",
+  "httpx==0.28.1",
+  "uvicorn[standard]==0.35.0",
+  "typer==0.17.4",
+  "rich>=13.0",
+  "cachetools>=5.3",
+  "limits>=3.10",
+  "python-dateutil>=2.9",
+  "pydantic-settings>=2.0",
+]
+
+[project.optional-dependencies]
+redis = ["redis>=5.0.0"]
+
+[project.urls]
+Homepage = "https://github.com/romanpert/mcp-aemps"
+Repository = "https://github.com/romanpert/mcp-aemps"
+Documentation = "https://github.com/romanpert/mcp-aemps#readme"
+"Bug Tracker" = "https://github.com/romanpert/mcp-aemps/issues"
+Changelog = "https://github.com/romanpert/mcp-aemps/blob/main/CHANGELOG.md"
+
+[project.scripts]
+mcp_aemps = "app.cli:cli"
+mcp-aemps = "app.cli:cli"
+
+[tool.poetry]
 packages = [
   { include = "app" }
 ]
-
-[tool.poetry.dependencies]
-python = "^3.13"
-fastapi = "0.116.2"
-fastapi-mcp = "0.4.0"
-httpx = "0.28.1"
-uvicorn = "0.35.0"
-typer = "0.17.4"
-pillow = "11.3.0"
-xlrd = "2.0.2"
-openpyxl = "3.1.5"
-aioredis = "1.3.1"
-fastapi-cache2 = "0.2.2"
-fastapi-limiter = "0.1.6"
-passlib = { version = "1.7.4", extras = ["bcrypt"] }
-pyjwt = { version = ">=2.10,<3.0", extras = ["crypto"] }
-PyMuPDF = "1.26.4"
-opentelemetry-api = "1.37.0"
-opentelemetry-sdk = "1.37.0"
-opentelemetry-instrumentation-fastapi = "0.58b0"
-opentelemetry-exporter-otlp = "1.37.0"
-opentelemetry-instrumentation-httpx = "0.58b0"
-opentelemetry-instrumentation-redis = "0.58b0"
-opentelemetry-instrumentation-logging = "0.58b0"
-opentelemetry-instrumentation-aiohttp-client = "0.58b0"
-opentelemetry-propagator-b3 = "1.37.0"
-watchfiles = "1.1.0"
-
-[tool.poetry.scripts]
-mcp_aemps = "app.cli:cli"
+exclude = [
+  "app/mcp_aemps.json",
+  "app/**/__pycache__",
+  "**/.pytest_cache",
+]

@@ -1,7 +1,6 @@
 # mcp_aemps/app/routes/documentos.py
 # Document-access endpoints:
-#   /doc-secciones, /doc-contenido, /doc-html/ft*, /doc-html/p*,
-#   /descargar-ipt
+#   /doc-secciones, /doc-contenido, /doc-html/ft*, /doc-html/p*
 from __future__ import annotations
 
 import asyncio
@@ -9,7 +8,7 @@ import logging
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response, Path as FPath
+from fastapi import APIRouter, HTTPException, Query, Response, Path as FPath
 from fastapi.responses import HTMLResponse
 from httpx import HTTPStatusError
 
@@ -47,15 +46,13 @@ class Format(str, Enum):
     dependencies=[limit_heavy],
 )
 async def doc_secciones(
-    request: Request,
-    tipo_doc: int = FPath(..., ge=1, le=4, description="1=FT,2=Prospecto,3-4 otros"),
+    tipo_doc: int = FPath(..., ge=1, le=4, description="1=FT, 2=Prospecto, 3-4 otros"),
     nregistro: Optional[List[str]] = Query(None, description="Uno o varios numeros de registro"),
     cn: Optional[List[str]] = Query(None, description="Uno o varios codigos nacionales"),
 ) -> Dict[str, Any]:
     if not (nregistro or cn):
         raise HTTPException(400, detail="Se requiere al menos un 'nregistro' o 'cn'.")
 
-    df_presentaciones = getattr(request.app.state, "df_presentaciones", None)
     resultados_agregados: List[Dict[str, Any]] = []
     normalized_nregistros: list[str] = []
     normalized_cns: list[str] = []
@@ -63,10 +60,9 @@ async def doc_secciones(
     try:
         for code_list, is_cn in [(nregistro or [], False), (cn or [], True)]:
             for code in code_list:
-                nr_norm, cn_norm = normalize_nregistro_and_cn(
+                nr_norm, cn_norm = await normalize_nregistro_and_cn(
                     nregistro=None if is_cn else code,
                     cn=code if is_cn else None,
-                    df_presentaciones=df_presentaciones,
                 )
                 if cn_norm:
                     normalized_cns.append(cn_norm)
@@ -96,11 +92,10 @@ async def doc_secciones(
         "nregistro": normalized_nregistros or nregistro,
         "cn": normalized_cns or cn,
     }
-    metadatos = _build_metadata(parametros)
 
     if resultados_agregados:
         logger.info("Retornando %s secciones", len(resultados_agregados))
-    return format_response(resultados_agregados, metadatos)
+    return format_response(resultados_agregados, _build_metadata(parametros))
 
 
 # ---------------------------------------------------------------------------
@@ -115,26 +110,24 @@ async def doc_secciones(
     dependencies=[limit_standard],
 )
 async def doc_contenido(
-    request: Request,
     tipo_doc: int = FPath(..., ge=1, le=2),
     nregistro: Optional[str] = Query(None, description="N Registro medicamento"),
     cn: Optional[str] = Query(None, description="Codigo Nacional del Medicamento"),
-    seccion: Optional[str] = Query(None, description="Seccion en string estilo <2.1>, <4.2>, ..."),
+    seccion: Optional[str] = Query(None, description="Seccion estilo <2.1>, <4.2>, ..."),
     format: Format = Query(Format.json, description="Formato: json, html o txt"),
 ) -> Any:
     if not (nregistro or cn):
         raise HTTPException(400, "Se requiere 'nregistro' o 'cn'.")
 
-    df_presentaciones = getattr(request.app.state, "df_presentaciones", None)
-    nr_norm, cn_norm = normalize_nregistro_and_cn(
-        nregistro=nregistro, cn=cn, df_presentaciones=df_presentaciones,
-    )
+    nr_norm, cn_norm = await normalize_nregistro_and_cn(nregistro=nregistro, cn=cn)
 
     if not nr_norm:
         raise HTTPException(404, detail="No se pudo resolver el numero de registro del medicamento solicitado")
 
     ext_map = {Format.json: "html", Format.html: "html", Format.txt: "txt"}
-    cima_url = build_dochtml_url(tipo_doc=tipo_doc, nregistro=nr_norm, seccion=seccion, ext=ext_map.get(format, "html"))
+    cima_url = build_dochtml_url(
+        tipo_doc=tipo_doc, nregistro=nr_norm, seccion=seccion, ext=ext_map.get(format, "html")
+    )
 
     try:
         resultado = await safe_cima_call(
@@ -163,7 +156,6 @@ async def doc_contenido(
 async def _fetch_html_batch(
     tipo: str, nregistro: List[str], filename: str, not_found_label: str,
 ) -> Dict[str, Any]:
-    """Shared logic for batch HTML doc endpoints."""
     if not nregistro or not filename:
         raise HTTPException(400, "Se requiere al menos un 'nregistro' y un 'filename'.")
 
@@ -194,7 +186,7 @@ async def _fetch_html_batch(
 @router.get(
     "/doc-html/ft",
     operation_id="html_ficha_tecnica_multiple",
-    summary="Obtiene las fichas tecnicas HTML en JSON para varios registros",
+    summary="Fichas tecnicas HTML para varios registros",
     response_model=None,
     dependencies=[limit_heavy],
 )
@@ -208,7 +200,7 @@ async def html_ficha_tecnica_multiple(
 @router.get(
     "/doc-html/p",
     operation_id="html_prospecto_multiple",
-    summary="Obtiene los prospectos HTML en JSON para varios registros",
+    summary="Prospectos HTML para varios registros",
     response_model=None,
     dependencies=[limit_heavy],
 )
@@ -220,7 +212,6 @@ async def html_prospecto_multiple(
 
 
 async def _fetch_html_single(tipo: str, nregistro: str, filename: str, label: str):
-    """Shared logic for single-doc HTML endpoints."""
     try:
         data = await cima.get_html_bytes(tipo=tipo, nregistro=nregistro, filename=filename)
     except HTTPStatusError as e:
@@ -257,52 +248,3 @@ async def html_prospecto(
 ):
     return await _fetch_html_single("p", nregistro, filename, "Prospecto")
 
-
-# ---------------------------------------------------------------------------
-# 4. Descargar IPT
-# ---------------------------------------------------------------------------
-@router.get(
-    "/descargar-ipt",
-    operation_id="descargar_ipt",
-    summary="Obtener IPT: JSON con texto extraido y metadatos",
-    response_model=Dict[str, Any],
-    dependencies=[limit_heavy],
-)
-async def descargar_ipt(
-    cn: Optional[List[str]] = Query(None, description="Uno o varios CN"),
-    nregistro: Optional[List[str]] = Query(None, description="Uno o varios NRegistro"),
-    timeout: int = Query(15, ge=5, le=60, description="Timeout en segundos"),
-) -> Dict[str, Any]:
-    if not cn and not nregistro:
-        raise HTTPException(400, "Debe proporcionar al menos un CN o un NRegistro")
-
-    tareas = [
-        *(cima.download_ipt(cn=code, timeout=timeout, only_url=False, with_text=True) for code in (cn or [])),
-        *(cima.download_ipt(nregistro=nr, timeout=timeout, only_url=False, with_text=True) for nr in (nregistro or [])),
-    ]
-    codes = [*(cn or []), *(nregistro or [])]
-
-    respuestas = await asyncio.gather(*tareas, return_exceptions=True)
-
-    ipt_items: List[dict] = []
-    errores: Dict[str, str] = {}
-
-    for code, res in zip(codes, respuestas):
-        if isinstance(res, Exception):
-            errores[code] = str(res)
-        elif res:
-            ipt_items.extend(res)
-
-    if not ipt_items and errores:
-        raise HTTPException(404, detail={"error": "Sin IPT", "errores": errores})
-
-    params_used: Dict[str, Any] = {}
-    if cn:
-        params_used["cn"] = cn
-    if nregistro:
-        params_used["nregistro"] = nregistro
-
-    payload: Dict[str, Any] = {"ipt": ipt_items}
-    if errores:
-        payload["errores"] = errores
-    return format_response(payload, _build_metadata(params_used))

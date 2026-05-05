@@ -1,6 +1,10 @@
 # mcp_aemps/app/routes/vigilancia.py
 # Regulatory monitoring endpoints:
-#   /registro-cambios, /problemas-suministro, /notas*, /materiales*
+#   /registro-cambios
+#   /problemas-suministro          — global o por CN (v2 con fallback v1)
+#   /problemas-suministro/dcp/{cod_dcp}   — por DCP (v2 oficial)
+#   /problemas-suministro/dcpf/{cod_dcpf} — por DCPF (v2 oficial)
+#   /notas*, /materiales*
 from __future__ import annotations
 
 import asyncio
@@ -26,7 +30,6 @@ LOG_STACKTRACES = bool(settings.log_stacktraces)
 
 router = APIRouter(tags=["Medicamentos"])
 
-# --- Lookup tables for registro-cambios ---
 TIPO_CAMBIO_MAP = {1: "Nuevo", 2: "Baja", 3: "Modificado"}
 CAMBIOS_MAP = {
     "estado": "Estado de autorizacion",
@@ -84,31 +87,33 @@ async def registro_cambios(
 
 
 # ---------------------------------------------------------------------------
-# 2. Problemas de suministro
+# 2a. Problemas de suministro — global o por CN
+#     Sin params: GET /psuministro (v1, listado global paginado)
+#     Con cn/nregistro: GET /psuministro/v2/cn/{cn} (v2, con fallback v1)
 # ---------------------------------------------------------------------------
 @router.get(
     "/problemas-suministro",
     operation_id="problemas_suministro",
-    summary="Consultar problemas de suministro por uno o varios CN",
+    summary="Problemas de suministro: global paginado o detalle por CN (v2 con fallback v1)",
     response_model=Dict[str, Any],
     dependencies=[limit_heavy],
 )
 async def problemas_suministro(
     cn: Optional[List[str]] = Query(None, description="Uno o mas Codigos Nacionales."),
     nregistro: Optional[List[str]] = Query(None, description="Uno o mas numeros de registro."),
-    pagina: int = Query(1, ge=1, description="Numero de pagina"),
-    tamanioPagina: int = Query(10, ge=1, le=100, description="Tamano de pagina"),
+    pagina: int = Query(1, ge=1, description="Pagina (solo en listado global)"),
+    tamanioPagina: int = Query(25, ge=1, le=100, description="Tamano de pagina (solo en listado global)"),
 ) -> Dict[str, Any]:
     parametros = {"cn": cn, "nregistro": nregistro, "pagina": pagina, "tamanioPagina": tamanioPagina}
     metadatos = _build_metadata(parametros, API_PSUM_VERSION)
     metadatos["metadata"]["tipo_problema_suministros"] = cima.TIPOS_PROBLEMA
 
-    # No filter: global listing
+    # Global listing
     if not cn and not nregistro:
-        listado = await safe_cima_call(cima.psuministro, None, pagina=pagina, tamanioPagina=tamanioPagina)
-        return format_response(listado.get("resultados", []), metadatos)
+        listado = await safe_cima_call(cima.psuministro_global, pagina=pagina, tamanioPagina=tamanioPagina)
+        return format_response(listado.get("resultados", []) if isinstance(listado, dict) else listado, metadatos)
 
-    # Resolve nregistro -> CNs via presentaciones
+    # Resolver nregistro → CNs via CIMA medicamento
     resolved_cn: List[str] = []
     errors_nregistro: Dict[str, Any] = {}
     if nregistro:
@@ -129,12 +134,13 @@ async def problemas_suministro(
                     resolved_cn.append(cn_val)
 
     resolved_cn = list(dict.fromkeys(resolved_cn))
-    cn_list = (cn or []) + resolved_cn
+    cn_list = list(dict.fromkeys((cn or []) + resolved_cn))
 
     if not cn_list:
         raise HTTPException(404, detail={"error": "No se encontraron CN para procesar", "errors_nregistro": errors_nregistro})
 
-    tasks = [safe_cima_call(cima.psuministro, codigo) for codigo in cn_list]
+    # Consultar v2/cn para cada CN (con fallback v1 integrado en psuministro_cn)
+    tasks = [safe_cima_call(cima.psuministro_cn, codigo) for codigo in cn_list]
     responses = await asyncio.gather(*tasks, return_exceptions=True)
 
     data: Dict[str, Any] = {}
@@ -161,10 +167,51 @@ async def problemas_suministro(
 
 
 # ---------------------------------------------------------------------------
+# 2b. Problemas de suministro por DCP
+#     GET /psuministro/v2/dcp/{cod_dcp}
+#     Devuelve: comercializados + con_psuministro para ese DCP
+# ---------------------------------------------------------------------------
+@router.get(
+    "/problemas-suministro/dcp/{cod_dcp}",
+    operation_id="problemas_suministro_dcp",
+    summary="Presentaciones comercializadas y con problemas de suministro para un DCP",
+    response_model=Dict[str, Any],
+    dependencies=[limit_standard],
+)
+async def problemas_suministro_dcp(
+    cod_dcp: str = FPath(..., description="Codigo DCP (descripcion clinica del producto)"),
+) -> Dict[str, Any]:
+    resultado = await safe_cima_call(cima.psuministro_dcp, cod_dcp)
+    if not resultado:
+        raise HTTPException(404, detail=f"No hay datos para el DCP {cod_dcp}")
+    return format_response(resultado, _build_metadata({"cod_dcp": cod_dcp}, API_PSUM_VERSION))
+
+
+# ---------------------------------------------------------------------------
+# 2c. Problemas de suministro por DCPF
+#     GET /psuministro/v2/dcpf/{cod_dcpf}
+#     Devuelve: comercializados + con_psuministro para ese DCPF
+# ---------------------------------------------------------------------------
+@router.get(
+    "/problemas-suministro/dcpf/{cod_dcpf}",
+    operation_id="problemas_suministro_dcpf",
+    summary="Presentaciones comercializadas y con problemas de suministro para un DCPF",
+    response_model=Dict[str, Any],
+    dependencies=[limit_standard],
+)
+async def problemas_suministro_dcpf(
+    cod_dcpf: str = FPath(..., description="Codigo DCPF (descripcion clinica del producto con formato)"),
+) -> Dict[str, Any]:
+    resultado = await safe_cima_call(cima.psuministro_dcpf, cod_dcpf)
+    if not resultado:
+        raise HTTPException(404, detail=f"No hay datos para el DCPF {cod_dcpf}")
+    return format_response(resultado, _build_metadata({"cod_dcpf": cod_dcpf}, API_PSUM_VERSION))
+
+
+# ---------------------------------------------------------------------------
 # 3. Notas de seguridad
 # ---------------------------------------------------------------------------
 async def _fetch_notas_batch(registros: List[str]) -> tuple[Dict[str, Any], Dict[str, str]]:
-    """Fetch notas for multiple registration numbers concurrently."""
     tasks = [safe_cima_call(cima.notas, nregistro=nr) for nr in registros]
     responses = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -185,17 +232,16 @@ async def _fetch_notas_batch(registros: List[str]) -> tuple[Dict[str, Any], Dict
 @router.get(
     "/notas",
     operation_id="listar_notas",
-    summary="Listado de notas de seguridad para uno o varios registros",
+    summary="Notas de seguridad para uno o varios registros",
     response_model=Dict[str, Any],
     dependencies=[limit_heavy],
 )
 async def listar_notas(
-    nregistro: List[str] = Query(..., description="Repite el parametro: ?nregistro=AAA&nregistro=BBB"),
+    nregistro: List[str] = Query(..., description="Repite: ?nregistro=AAA&nregistro=BBB"),
 ) -> Dict[str, Any]:
     if not nregistro:
         raise HTTPException(400, "Se requiere al menos un 'nregistro'.")
 
-    # BUG FIX: was sequential loop, now concurrent
     resultados, errores = await _fetch_notas_batch(nregistro)
 
     if not resultados:
@@ -212,11 +258,10 @@ async def listar_notas(
     dependencies=[limit_heavy],
 )
 async def obtener_notas(
-    nregistros: str = FPath(..., description="Numero(s) de registro separados por comas: AAA,BBB,CCC"),
+    nregistros: str = FPath(..., description="Registro(s) separados por comas: AAA,BBB,CCC"),
 ) -> Dict[str, Any]:
     registros = [nr.strip() for nr in nregistros.split(",") if nr.strip()]
 
-    # BUG FIX: was sequential loop, now concurrent
     resultados, errores = await _fetch_notas_batch(registros)
 
     if not resultados:
@@ -235,12 +280,12 @@ async def obtener_notas(
 @router.get(
     "/materiales",
     operation_id="listar_materiales",
-    summary="Listado de materiales informativos para uno o varios registros",
+    summary="Materiales informativos para uno o varios registros",
     response_model=Dict[str, Any],
     dependencies=[limit_heavy],
 )
 async def listar_materiales(
-    nregistro: List[str] = Query(..., description="Repite el parametro: ?nregistro=AAA&nregistro=BBB"),
+    nregistro: List[str] = Query(..., description="Repite: ?nregistro=AAA&nregistro=BBB"),
 ) -> Dict[str, Any]:
     if not nregistro:
         raise HTTPException(400, detail="Se requiere al menos un 'nregistro'.")
@@ -259,7 +304,7 @@ async def listar_materiales(
 @router.get(
     "/materiales/{nregistro}",
     operation_id="obtener_materiales",
-    summary="Detalle de materiales informativos de un registro",
+    summary="Materiales informativos de un registro",
     response_model=Dict[str, Any],
     dependencies=[limit_standard],
 )
