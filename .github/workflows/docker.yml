@@ -18,16 +18,12 @@ env:
 
 jobs:
   build:
-    name: Build & push (${{ matrix.platform }})
+    name: Build & push (multi-arch)
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
       id-token: write
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [linux/amd64, linux/arm64]
     steps:
       - uses: actions/checkout@v4
 
@@ -58,12 +54,15 @@ jobs:
             type=semver,pattern={{major}}
             type=raw,value=latest,enable={{is_default_branch}}
 
+      # Single build that produces a multi-arch manifest list (linux/amd64 +
+      # linux/arm64). Doing this in a matrix-of-platforms is a footgun: each
+      # matrix job pushes to the same tag and the last writer wins, leaving
+      # the manifest list with only one platform. One job → one manifest.
       - name: Build & push
-        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: ${{ matrix.platform }}
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
