@@ -15,6 +15,7 @@ router = APIRouter()
     tags=["Prompts"],
     operation_id="get_system_info_prompt",
     summary="Obtener el Prompt del sistema para el agente MCP",
+    description=constant.system_info_prompt_description,
     dependencies=[limit_local],
 )
 async def get_system_prompt() -> str:

@@ -19,6 +19,14 @@ from app.helpers import (
     parse_cima_fechas_list,
     safe_cima_call,
 )
+from app.mcp_constants import (
+    maestras_description,
+    medicamento_description,
+    medicamentos_description,
+    presentacion_description,
+    presentaciones_description,
+    vmpp_description,
+)
 from app.rate_limits import limit_heavy, limit_standard
 
 logger = logging.getLogger("mcp.aemps")
@@ -35,6 +43,7 @@ MAX_RESULTS = settings.max_results
     "/medicamento",
     operation_id="obtener_medicamento",
     summary="Obtener descripcion general de un medicamento (por CN o nregistro)",
+    description=medicamento_description,
     response_model=Dict[str, Any],
     dependencies=[limit_standard],
 )
@@ -83,6 +92,7 @@ async def obtener_medicamento(
     "/medicamentos",
     operation_id="buscar_medicamentos",
     summary="Listado de medicamentos con filtros regulatorios avanzados",
+    description=medicamentos_description,
     response_model=Dict[str, Any],
     dependencies=[limit_standard],
 )
@@ -175,6 +185,7 @@ async def buscar_medicamentos(
     "/presentaciones",
     operation_id="listar_presentaciones",
     summary="Listar presentaciones de un medicamento con filtros (cn, nregistro, etc.)",
+    description=presentaciones_description,
     response_model=Dict[str, Any],
     dependencies=[limit_standard],
 )
@@ -227,6 +238,7 @@ async def listar_presentaciones(
     "/presentacion",
     operation_id="obtener_presentacion",
     summary="Detalle de una o varias presentaciones (por uno o varios CN)",
+    description=presentacion_description,
     response_model=Dict[str, Any],
     dependencies=[limit_heavy],
 )
@@ -279,6 +291,7 @@ async def obtener_presentacion(
     "/vmpp",
     operation_id="buscar_vmpp",
     summary="Equivalentes clinicos VMP/VMPP filtrables por principio activo, dosis, forma, etc.",
+    description=vmpp_description,
     response_model=Dict[str, Any],
     dependencies=[limit_standard],
 )
@@ -322,6 +335,7 @@ async def buscar_vmpp(
     "/maestras",
     operation_id="consultar_maestras",
     summary="Consultar catalogos maestros: ATC, Principios Activos, Formas, Laboratorios...",
+    description=maestras_description,
     response_model=Dict[str, Any],
     dependencies=[limit_standard],
 )

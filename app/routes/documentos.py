@@ -22,6 +22,14 @@ from app.helpers import (
     normalize_nregistro_and_cn,
     safe_cima_call,
 )
+from app.mcp_constants import (
+    doc_contenido_description,
+    doc_secciones_description,
+    html_ft_description,
+    html_ft_multiple_description,
+    html_p_description,
+    html_p_multiple_description,
+)
 from app.rate_limits import limit_document, limit_heavy, limit_standard
 
 logger = logging.getLogger("mcp.aemps")
@@ -43,11 +51,12 @@ class Format(str, Enum):
     "/doc-secciones/{tipo_doc}",
     operation_id="doc_secciones",
     summary="Metadatos de secciones de Ficha Tecnica/prospecto",
+    description=doc_secciones_description,
     response_model=Dict[str, Any],
     dependencies=[limit_heavy],
 )
 async def doc_secciones(
-    tipo_doc: int = FPath(..., ge=1, le=4, description="1=FT, 2=Prospecto, 3-4 otros"),
+    tipo_doc: int = FPath(..., ge=1, le=4, description="1=FT, 2=Prospecto, 3=IPE, 4=Plan Gestion Riesgos"),
     nregistro: Optional[List[str]] = Query(None, description="Uno o varios numeros de registro"),
     cn: Optional[List[str]] = Query(None, description="Uno o varios codigos nacionales"),
 ) -> Dict[str, Any]:
@@ -106,6 +115,7 @@ async def doc_secciones(
     "/doc-contenido/{tipo_doc}",
     operation_id="doc_contenido",
     summary="Contenido de secciones de Ficha Tecnica/prospecto",
+    description=doc_contenido_description,
     response_model=None,
     responses={200: {"content": {"application/json": {}, "text/html": {}, "text/plain": {}}}},
     dependencies=[limit_standard],
@@ -201,6 +211,7 @@ async def _fetch_html_batch(
     "/doc-html/ft",
     operation_id="html_ficha_tecnica_multiple",
     summary="Fichas tecnicas HTML para varios registros",
+    description=html_ft_multiple_description,
     response_model=None,
     dependencies=[limit_document],
 )
@@ -215,6 +226,7 @@ async def html_ficha_tecnica_multiple(
     "/doc-html/p",
     operation_id="html_prospecto_multiple",
     summary="Prospectos HTML para varios registros",
+    description=html_p_multiple_description,
     response_model=None,
     dependencies=[limit_document],
 )
@@ -239,6 +251,7 @@ async def _fetch_html_single(tipo: str, nregistro: str, filename: str, label: st
     "/doc-html/ft/{nregistro}/{filename:path}",
     operation_id="html_ficha_tecnica",
     summary="HTML completo de ficha tecnica (unico registro)",
+    description=html_ft_description,
     response_model=None,
     dependencies=[limit_document],
 )
@@ -253,6 +266,7 @@ async def html_ficha_tecnica(
     "/doc-html/p/{nregistro}/{filename:path}",
     operation_id="html_prospecto",
     summary="HTML completo de prospecto (unico registro)",
+    description=html_p_description,
     response_model=None,
     dependencies=[limit_document],
 )

@@ -1,481 +1,511 @@
+"""LLM-facing descriptions for every MCP tool exposed by mcp-aemps.
+
+Single source of truth. Imported by both transports:
+- ``app.stdio_server`` (FastMCP ``@server.tool(description=...)``)
+- ``app.routes.*``      (FastAPI ``@router.get(..., description=...)``)
+
+Style guide (per CLAUDE.md "MCP Tool Design Principles"):
+1. Cite the data source ("Fuente: AEMPS CIMA REST API v1.23" or
+   "Problemas de Suministro v1.01").
+2. State the limitation ("solo medicamentos autorizados en Espana").
+3. Give a "Cuando usar" cue so the LLM can disambiguate sibling tools.
+4. Document parameter ranges as documented by AEMPS, not as the wrapper
+   happens to behave.
+5. Frame everything as regulatory data access — never clinical advice.
+
+Date format note: all timestamps returned by the upstream API are Unix
+epoch in milliseconds (CIMA core, GMT+2:00) or seconds (Problemas
+Suministro). The wrapper parses them to ISO-8601 in ``parse_cima_fechas``
+helpers, so tool results expose human-readable dates.
+"""
+
 # ---------------------------------------------------------------------------
-# Prompt helper
+# System prompt — agent-level guidance
 # ---------------------------------------------------------------------------
-MCP_AEMPS_SYSTEM_PROMPT = """
-Eres un **agente farmacéutico digital** en España con acceso a las siguientes herramientas MCP sobre la API CIMA (AEMPS):
+MCP_AEMPS_SYSTEM_PROMPT = """\
+Eres un **agente regulatorio farmaceutico** con acceso a la API CIMA de la
+Agencia Espanola de Medicamentos y Productos Sanitarios (AEMPS). Las
+herramientas exponen exclusivamente **datos publicos** del registro de
+medicamentos autorizados en Espana — nunca datos clinicos ni de pacientes.
 
-1. **Obtener ficha de un medicamento**
-   • `obtener_medicamento(cn, nregistro)`
-   - Parámetros: `cn` (Código Nacional) o `nregistro` (Número de registro).
-   - Devuelve: ficha completa con dosis, forma, vía, estado comercial, fechas y alertas.
+Fuentes oficiales:
+- CIMA REST API v1.23 (medicamentos, presentaciones, VMP/VMPP, maestras,
+  registro de cambios, documentos segmentados, notas, materiales).
+- CIMA Problemas de Suministro v1.01 (psuministro v2: por CN, DCP, DCPF y
+  listado global).
 
-2. **Listar y filtrar medicamentos**
-   • `buscar_medicamentos(**filtros)`
-   - Parámetros opcionales: `nombre`, `laboratorio`, `practiv1`, `practiv2`, `atc`, `cn`, `nregistro`, `huerfano`, `biosimilar`, `triangulo`, `pagina`, etc.
-   - Devuelve: listado paginado con más de 20 posibles filtros.
+# Catalogo de herramientas
 
-3. **Buscar en ficha técnica**
-   • `buscar_en_ficha_tecnica(reglas)`
-   - Cuerpo: lista de reglas `{seccion, texto, contiene}`.
-   - Devuelve: coincidencias dentro de secciones específicas.
+## 1. Medicamento concreto
+- `obtener_medicamento(cn|nregistro)` → ficha completa de UN medicamento
+  identificado por Codigo Nacional (CN) o numero de registro AEMPS.
+- `buscar_medicamentos(...filtros...)` → listado paginado con filtros
+  regulatorios (>20 filtros: principio activo, ATC, laboratorio, flags
+  triangulo/huerfano/biosimilar/comerc/receta/estupefaciente/psicotropo,
+  etc.). Usalo cuando NO conoces el CN/nregistro.
+- `buscar_en_ficha_tecnica(reglas)` → busqueda textual dentro de
+  secciones 1..10 de la ficha tecnica. Devuelve la lista de medicamentos
+  que cumplen TODAS las reglas (`contiene=1` exige presencia,
+  `contiene=0` exige ausencia).
 
-4. **Presentaciones de un medicamento**
-   • `listar_presentaciones(cn, nregistro, vmp, vmpp, idpractiv1, pagina, ...)`
-   • `obtener_presentacion(cn=[...])`
-   - `listar_presentaciones`: listado general.
-   - `obtener_presentacion`: detalle para uno o varios CN (paraleliza llamadas y devuelve `{cn: detalle}`).
+## 2. Presentaciones / equivalentes
+- `listar_presentaciones(...)` → listado paginado de presentaciones por
+  CN, nregistro, VMP, VMPP o principio activo.
+- `obtener_presentacion(cn=[...])` → detalle por CN. Acepta varios
+  CN — paraleliza llamadas al endpoint oficial single-CN.
+- `buscar_vmpp(...)` → equivalentes clinicos VMP/VMPP filtrables por
+  principio activo, dosis, forma, ATC, nombre. `modoArbol=1` devuelve
+  jerarquia.
 
-5. **Equivalentes clínicos (VMP/VMPP)**
-   • `buscar_vmpp(practiv1, dosis, forma, atc, nombre, modoArbol, pagina)`
-   - Filtra por principio activo, dosis, forma farmacéutica, ATC, etc.
+## 3. Catalogos
+- `consultar_maestras(maestra=...)` → tablas oficiales: 1=ppio activo,
+  3=forma, 4=via, 6=laboratorio, 7=ATC, 11/13/14=SNOMED equivalentes,
+  15=medicamentos, 16=medicamentos comercializados (SNOMED).
 
-6. **Catálogos maestros**
-   • `consultar_maestras(maestra, nombre, id, codigo, estupefaciente, psicotropo, enuso, pagina)`
-   - Acceso a ATC, principios activos, formas farmacéuticas, laboratorios…
+## 4. Cambios y vigilancia
+- `registro_cambios(fecha, nregistro)` → altas (tipoCambio=1), bajas (2),
+  modificaciones (3) desde una fecha (formato `dd/mm/yyyy`). Cada cambio
+  incluye etiquetas: `estado`, `comerc`, `prosp`, `ft`, `psum`,
+  `notasSeguridad`, `matinf`, `otros`.
+- `listar_notas(nregistro=[...])` → notas de seguridad publicadas por la
+  AEMPS para uno o varios registros.
+- `listar_materiales(nregistro=[...])` → materiales informativos para
+  pacientes / profesionales sanitarios.
 
-7. **Registro de cambios**
-   • `registro_cambios(fecha="dd/mm/yyyy", nregistro, metodo="GET"|"POST")`
-   - Historial de altas, bajas y modificaciones desde una fecha dada.
+## 5. Problemas de suministro (psuministro v2)
+- `problemas_suministro(cn=[...]|nregistro=[...]|vacio)` → si vacio,
+  listado paginado global; si CN, detalle por presentacion (incluye
+  `tipoProblemaSuministro` 1..9, fechas inicio/fin, `activo`,
+  observaciones). Si solo das `nregistro`, el wrapper lo resuelve a CNs.
+- `problemas_suministro_dcp(cod_dcp)` → numero de presentaciones
+  comercializadas y con problema activo para un DCP.
+- `problemas_suministro_dcpf(cod_dcpf)` → idem para DCPF.
 
-8. **Problemas de suministro**
-   • `problemas_suministro(cn=[...])`
-   - Sin parámetros: paginado global.
-   - Con uno o varios CN: paraleliza llamadas y devuelve `{cn: resultado}` (v2 con fallback v1).
-   • `problemas_suministro_dcp(cod_dcp)`
-   - Presentaciones comercializadas y con problemas de suministro para un DCP (descripción clínica del producto).
-   • `problemas_suministro_dcpf(cod_dcpf)`
-   - Presentaciones comercializadas y con problemas de suministro para un DCPF (descripción clínica con forma farmacéutica).
+## 6. Documentos
+- `doc_secciones(tipo_doc, nregistro|cn)` → metadatos de secciones de
+  ficha tecnica (tipo_doc=1) o prospecto (tipo_doc=2). Tambien admite
+  3=Informe Publico de Evaluacion y 4=Plan de Gestion de Riesgos.
+- `doc_contenido(tipo_doc, nregistro|cn, seccion?, format=json|html|txt)`
+  → contenido de la seccion solicitada (o todas si se omite).
+- `html_ficha_tecnica(nregistro)` / `html_prospecto(nregistro)` →
+  HTML completo (sin trocear en secciones).
 
-9. **Documentos segmentados**
-   • `doc_secciones(tipo_doc=1-4, nregistro, cn)` → metadatos de secciones.
-   • `doc_contenido(tipo_doc=1-4, nregistro, cn, seccion)` → contenido HTML/JSON de cada sección.
+# Flujo recomendado
 
-10. **Notas de seguridad**
-    • `listar_notas(nregistro=[...])`
-    • `obtener_notas(nregistro)`
-    - Soporta uno o varios números de registro, devuelve lista o `{nregistro: notas}`.
+1. Si el usuario da un CN o nregistro → `obtener_medicamento` y, si pide
+   detalle de presentacion o suministro, `obtener_presentacion` /
+   `problemas_suministro`.
+2. Si el usuario describe el medicamento → `buscar_medicamentos`
+   (filtros) o `buscar_vmpp` (equivalentes clinicos).
+3. Si pregunta por contenido textual de la ficha → primero
+   `buscar_en_ficha_tecnica` (filtra por contenido), luego
+   `doc_contenido` (lee la seccion concreta).
+4. Para alertas regulatorias → `listar_notas` (seguridad) y
+   `registro_cambios` (modificaciones recientes).
+5. Para suministro: por CN siempre que sea posible; usa DCP/DCPF solo
+   si trabajas con codigos clinicos.
 
-11. **Materiales informativos**
-    • `listar_materiales(nregistro=[...])`
-    • `obtener_materiales(nregistro)`
-    - Igual que notas, para materiales informativos.
+# Pautas para las respuestas
 
-12. **Descarga de HTML completo**
-    • Ficha técnica:
-      - `html_ficha_tecnica_multiple(nregistro=[...], filename)`
-      - `html_ficha_tecnica(nregistro, filename)`
-    • Prospecto:
-      - `html_prospecto_multiple(nregistro=[...], filename)`
-      - `html_prospecto(nregistro, filename)`
-    - Para varios registros devuelve `{nregistro: html_str}`, para uno StreamingResponse.
-
-
----
-## Flujo recomendado
-
-1. Para datos estructurados, usa la herramienta especifica (`obtener_medicamento`, `listar_presentaciones`, etc.).
-2. Para contenido segmentado de fichas y prospectos, usa `doc_secciones` y `doc_contenido`.
-3. Para busquedas de texto dentro de fichas tecnicas, usa `buscar_en_ficha_tecnica`.
-4. Para listados con filtros, usa `buscar_medicamentos` o `buscar_vmpp`.
-5. Para alertas de suministro por CN usa `problemas_suministro`; por DCP/DCPF usa `problemas_suministro_dcp` / `problemas_suministro_dcpf`.
-6. Para notas de seguridad y cambios recientes, usa `listar_notas`, `registro_cambios`.
-
----
-## Pautas para las respuestas
-
-- Resume siempre: **dosis, forma, vía**, **estado comercial**, **fechas** relevantes y **alertas** principales.
-- No proporciones consejo médico; solo información regulatoria.
-- **Cita “Datos CIMA (AEMPS)”** cada vez que extraigas datos de las herramientas, así como las URLs HTTP que uses para consultar.
-- Incluye siempre la última fecha de actualización, p. ej., “Datos extraídos el 15/09/2024.”
-- Al final de cada respuesta, agrega una pequeña línea con el descargo de responsabilidad:
-  > Esta información no constituye consejo médico; se proporciona únicamente a efectos informativos. Datos proporcionados por la AEMPS.”
-- Maneja errores devolviendo mensajes claros si falta un parámetro obligatorio (por ejemplo, `cn` o `nregistro`), o si una herramienta upstream falla.
-- Asegúrate de no violar ningún término de uso de la AEMPS.
+- Resume siempre dosis, forma farmaceutica, via, estado comercial,
+  fechas relevantes y alertas asociadas.
+- Cita la fuente: "Datos: AEMPS CIMA" + URL oficial cuando proceda.
+- Indica la fecha de extraccion ("Datos extraidos el dd/mm/yyyy").
+- Cierra cada respuesta con el descargo de responsabilidad:
+  > Esta informacion no constituye consejo medico; se proporciona unicamente a efectos informativos. Datos publicados por la AEMPS.
+- Nunca emitas recomendaciones clinicas, diagnostico o prescripcion.
+- Si falta un parametro obligatorio, devuelve un mensaje claro y para
+  la ejecucion.
 """
 
-medicamento_description = """
-Devuelve la **ficha completa** de un medicamento concreto,
-identificado por su **Código Nacional** (`cn`) o por su **Número de Registro AEMPS** (`nregistro`).
+# ---------------------------------------------------------------------------
+# Per-tool descriptions
+# ---------------------------------------------------------------------------
 
-**Uso**
-- Proporciona **solo dígitos** en `cn` para buscar por Código Nacional.
-- Proporciona **solo dígitos** en `nregistro` para buscar por Número de Registro AEMPS.
-- No es necesario enviar ambos parámetros; **será suficiente** con uno de ellos.
+medicamento_description = """\
+Devuelve la ficha completa de UN medicamento autorizado por la AEMPS,
+identificado por Codigo Nacional (`cn`) o numero de registro
+(`nregistro`).
 
-**Parámetros**
-- `cn` (opcional, string): Código Nacional del medicamento (solo dígitos).
-- `nregistro` (opcional, string): Número de registro AEMPS (solo dígitos).
+Cuando usar: ya conoces el CN o nregistro y necesitas la ficha
+estructurada (principios activos, dosis, forma, via, estado de
+autorizacion y comercializacion, flags regulatorios, presentaciones,
+documentos asociados).
+
+Parametros (al menos uno obligatorio):
+- `cn` (str, solo digitos): Codigo Nacional de la presentacion.
+- `nregistro` (str, solo digitos): numero de registro AEMPS.
+
+Fuente: AEMPS CIMA REST API v1.23 — `GET /cima/rest/medicamento`.
+Limitacion: solo medicamentos autorizados en Espana.
 """
 
-medicamentos_description = """
-Devuelve un **listado paginado** de medicamentos que cumplen los filtros especificados.
+medicamentos_description = """\
+Listado paginado de medicamentos autorizados en Espana que cumplen los
+filtros indicados.
 
-**Uso**
-- Proporciona uno o varios parámetros para refinar la búsqueda.
-- Si no se especifica ningún filtro, se listan **todos** los medicamentos (paginados).
-- El parámetro `pagina` indica la página de resultados (entero ≥ 1; por defecto 1).
+Cuando usar: NO conoces el CN/nregistro y necesitas localizar
+medicamentos por nombre, principio activo, laboratorio, ATC, o por
+caracteristicas regulatorias (huerfano, biosimilar, triangulo negro,
+sustituibilidad...).
 
-**Parámetros disponibles** (todos opcionales)
-- `nombre` (str): coincidencia parcial o exacta del nombre.
-- `laboratorio` (str): nombre del laboratorio fabricante.
-- `practiv1`, `practiv2` (str): nombre del principio activo principal o secundario.
-- `idpractiv1`, `idpractiv2` (str): ID numérico del principio activo (solo dígitos).
-- `cn` (str): Código Nacional (solo dígitos).
-- `atc` (str): código ATC completo o parcial.
-- `nregistro` (str): Número de Registro AEMPS (solo dígitos).
-- `npactiv` (int): número de principios activos asociados.
-- `triangulo`, `huerfano`, `biosimilar`, `comerc`, `autorizados`, `receta`, `estupefaciente`, `psicotropo`, `estuopsico` (int; 0 o 1): flags específicos (1 = incluye, 0 = excluye).
-- `sust` (int; 1–5): tipo especial de medicamento.
-- `vmp` (str): ID de código VMP para equivalentes clínicos.
-- `pagina` (int; ≥ 1): número de página de resultados.
+Parametros (todos opcionales; combinar libremente):
+- `nombre` (str): nombre comercial (parcial o exacto).
+- `laboratorio` (str): laboratorio titular.
+- `practiv1`, `practiv2` (str): nombre de un principio activo.
+- `idpractiv1`, `idpractiv2` (str): ID numerico del principio activo.
+- `cn` (str, digitos), `nregistro` (str, digitos).
+- `atc` (str): codigo ATC completo o parcial (acepta descripcion).
+- `npactiv` (int): numero de principios activos asociados.
+- `triangulo`, `huerfano`, `biosimilar`, `comerc`, `autorizados`,
+  `receta`, `estupefaciente`, `psicotropo`, `estuopsico` (int 0|1):
+  flags binarios.
+- `sust` (int 1..5): tipo de medicamento especial (1=biologicos,
+  2=estrecho margen terapeutico, 3=especial control medico,
+  4=respiratorio inhalatoria, 5=estrecho margen terapeutico).
+- `vmp` (str): ID VMP para equivalentes clinicos.
+- `pagina` (int >=1, defecto 1).
+
+Fuente: AEMPS CIMA REST API v1.23 — `GET /cima/rest/medicamentos`.
+Limitacion: solo medicamentos autorizados en Espana; resultados
+paginados.
 """
 
-buscar_ficha_tecnica_description = """
-Realiza búsquedas textuales dentro de secciones específicas de la ficha técnica de uno o varios medicamentos.
+buscar_ficha_tecnica_description = """\
+Busqueda textual sobre secciones de la ficha tecnica de los medicamentos
+autorizados. Devuelve la lista de medicamentos cuya ficha cumple TODAS
+las reglas indicadas.
 
-**Uso**
-- Envía en el cuerpo un array JSON de reglas de búsqueda.
-- Cada regla debe incluir:
-  - `seccion` (str): sección de la ficha técnica en formato “N” o “N.N” (p. ej. “4” o “4.1”).
-  - `texto` (str): palabra o frase a buscar.
-  - `contiene` (int): 1 = debe contener ese texto; 0 = no debe contenerlo.
+Cuando usar: necesitas localizar medicamentos por contenido textual
+de su ficha tecnica (p.ej. "que mencionen 'cancer' en la seccion 4.1
+pero NO mencionen 'estomago'").
 
-**Ejemplo de cuerpo**
+Parametro:
+- `reglas` (list, obligatorio): lista de objetos
+  `{seccion, texto, contiene}`:
+  - `seccion` (str): numero de seccion en formato `N` o `N.N`
+    (1..10 segun spec AEMPS; p.ej. `"4.1"`).
+  - `texto` (str): cadena a buscar.
+  - `contiene` (int 0|1): 1 = la seccion DEBE contener el texto;
+    0 = NO debe contenerlo.
+
+Ejemplo:
 ```json
 [
-  { "seccion": "4.1", "texto": "cáncer",   "contiene": 1 },
-  { "seccion": "4.1", "texto": "estómago", "contiene": 0 }
+  {"seccion": "4.1", "texto": "cancer",  "contiene": 1},
+  {"seccion": "4.1", "texto": "estomago","contiene": 0}
 ]
 ```
+
+Fuente: AEMPS CIMA REST API v1.23 — `POST /cima/rest/buscarEnFichaTecnica`.
+Limitacion: solo fichas tecnicas de medicamentos autorizados; secciones
+1..10 (estructura oficial CIMA).
 """
 
-presentaciones_description = """
-Devuelve un **listado paginado** de presentaciones de medicamentos según filtros opcionales.
+presentaciones_description = """\
+Listado paginado de presentaciones de medicamentos autorizados.
 
-**Uso**
-- Envía los filtros como parámetros de consulta.
-- Si no se especifica ningún filtro, se listan **todas** las presentaciones (paginadas).
-- `pagina` indica la página de resultados (entero ≥ 1; por defecto 1).
+Cuando usar: necesitas listar presentaciones (formato + envase) sin
+saber CN, o filtrarlas por VMP/VMPP/principio activo/comercializacion.
 
-**Parámetros disponibles** (todos opcionales)
-- `cn` (str): Código Nacional (solo dígitos).
-- `nregistro` (str): Número de registro AEMPS (solo dígitos).
-- `vmp` (str): ID del código VMP para equivalentes clínicos.
-- `vmpp` (str): ID del código VMPP.
-- `idpractiv1` (str): ID numérico del principio activo (solo dígitos).
-- `comerc` (int; 0 o 1): 1 = comercializado, 0 = no comercializado.
-- `estupefaciente`, `psicotropo`, `estuopsico` (int; 0 o 1): flags de inclusión/exclusión (1 = incluye, 0 = excluye).
-- `pagina` (int; ≥ 1): página de resultados (por defecto 1).
+Parametros (todos opcionales):
+- `cn` (str, digitos), `nregistro` (str, digitos).
+- `vmp`, `vmpp` (str): ID de VMP/VMPP para equivalencias clinicas.
+- `idpractiv1` (str): ID del principio activo.
+- `comerc` (int 0|1): 1 comercializadas, 0 no comercializadas.
+- `estupefaciente`, `psicotropo`, `estuopsico` (int 0|1): flags.
+- `pagina` (int >=1, defecto 1).
+
+Fuente: AEMPS CIMA REST API v1.23 — `GET /cima/rest/presentaciones`.
+Limitacion: solo presentaciones de medicamentos autorizados.
 """
 
+presentacion_description = """\
+Detalle de una o varias presentaciones por Codigo Nacional.
 
-presentacion_description = """
-Obtiene los detalles de presentación para uno o varios medicamentos identificados por su **Código Nacional** (CN).
+Cuando usar: ya conoces el CN y necesitas el detalle (estado,
+comercializacion, problemas de suministro abiertos). Acepta una lista
+de CNs y paraleliza llamadas al endpoint oficial single-CN.
 
-**Uso**
-- Envía uno o varios parámetros `cn`:
-  - Único CN: `GET /presentacion?cn=123456789`
-  - Varios CN: `GET /presentacion?cn=123&cn=456&cn=789`
+Parametro:
+- `cn` (list[str], obligatorio): uno o varios Codigos Nacionales (solo
+  digitos).
 
-**Parámetro**
-- `cn` (List[str], **requerido**): uno o varios Códigos Nacionales (solo dígitos). Repetir `cn` por cada valor.
+Fuente: AEMPS CIMA REST API v1.23 — `GET /cima/rest/presentacion/{cn}`.
+Wrapper: paraleliza una llamada por cada CN y agrega resultados en
+`{cn: detalle, ...}` con `errors` para los CNs no resueltos.
+Limitacion: solo presentaciones de medicamentos autorizados.
 """
 
+vmpp_description = """\
+Listado paginado de equivalentes clinicos VMP / VMPP (Virtual Medicinal
+Product / Virtual Medicinal Product Pack).
 
-vmpp_description = """
-Devuelve un **listado paginado** de equivalentes clínicos VMP/VMPP según filtros opcionales.
+Cuando usar: necesitas equivalencias clinicas entre medicamentos por
+principio activo + dosis + forma + via, p.ej. para sustitucion o
+busqueda de alternativas autorizadas.
 
-**Uso**
-- Envía los filtros como parámetros de consulta.
-- Si no se especifica ningún filtro, se listan **todos** los registros (paginados).
-- `pagina` indica la página de resultados (entero ≥ 1; por defecto 1).
-
-**Parámetros disponibles** (todos opcionales)
+Parametros (todos opcionales):
 - `practiv1` (str): nombre del principio activo principal.
-- `idpractiv1` (str): ID numérico del principio activo (solo dígitos).
-- `dosis` (str): dosis del medicamento (según CIMA).
-- `forma` (str): forma farmacéutica.
-- `atc` (str): código ATC completo o parcial.
+- `idpractiv1` (str): ID del principio activo.
+- `dosis` (str): dosis (formato CIMA).
+- `forma` (str): forma farmaceutica.
+- `atc` (str): codigo ATC completo o parcial.
 - `nombre` (str): nombre del medicamento.
-- `modoArbol` (int; 0 o 1): 1 = respuesta en modo jerárquico, 0 = plano.
-- `pagina` (int; ≥ 1): número de página de resultados.
+- `modoArbol` (int 0|1): 1 = respuesta jerarquica VMP -> VMPP.
+- `pagina` (int >=1, defecto 1).
+
+Fuente: AEMPS CIMA REST API v1.23 — `GET /cima/rest/vmpp`.
+Limitacion: solo equivalencias publicadas por AEMPS.
 """
 
-maestras_description = """
-Devuelve un **listado paginado** de elementos de un catálogo maestro (maestra) según filtros opcionales.
+maestras_description = """\
+Catalogos maestros oficiales de la AEMPS (principios activos, formas,
+vias, laboratorios, ATC, equivalencias SNOMED, medicamentos).
 
-**Uso**
-- Envía los filtros como parámetros de consulta.
-- Si no se especifica ningún filtro, se listan **todos** los elementos (paginados).
-- `pagina` indica la página de resultados (entero ≥ 1; por defecto 1).
+Cuando usar: necesitas resolver / listar elementos de una tabla oficial
+(p.ej. todos los codigos ATC del nivel 4, o el ID de un principio activo
+para usarlo como `idpractiv1` en otras herramientas).
 
-**Parámetros disponibles** (todos opcionales salvo `maestra`)
-- `maestra` (int, **requerido**): ID de la maestra a consultar:
-  - 1: Principios activos
-  - 3: Formas farmacéuticas
-  - 4: Vías de administración
-  - 6: Laboratorios
-  - 7: Códigos ATC
-  - 11: Principios Activos (SNOMED)
-  - 13: Formas farmacéuticas simplificadas (SNOMED)
-  - 14: Vías de administración simplificadas (SNOMED)
-  - 15: Medicamentos
-  - 16: Medicamentos comercializados (SNOMED)
-- `nombre` (str): nombre parcial o exacto del elemento.
-- `id` (str): ID del elemento (solo dígitos).
-- `codigo` (str): código del elemento (ej. ATC).
-- `estupefaciente`, `psicotropo`, `estuopsico`, `enuso` (int; 0 o 1): flags de filtrado.
-- `pagina` (int; ≥ 1): número de página de resultados.
+Parametros:
+- `maestra` (int, OBLIGATORIO): ID de la maestra:
+  - 1 Principios activos
+  - 3 Formas farmaceuticas
+  - 4 Vias de administracion
+  - 6 Laboratorios
+  - 7 Codigos ATC
+  - 11 Principios activos (SNOMED)
+  - 13 Formas farmaceuticas simplificadas (SNOMED)
+  - 14 Vias de administracion simplificadas (SNOMED)
+  - 15 Medicamentos
+  - 16 Medicamentos comercializados (SNOMED)
+- `nombre`, `id`, `codigo` (str, opcionales): filtros del elemento.
+- `estupefaciente`, `psicotropo`, `estuopsico`, `enuso` (int 0|1).
+- `pagina` (int >=1, defecto 1).
+
+Fuente: AEMPS CIMA REST API v1.23 — `GET /cima/rest/maestras`.
 """
 
-registro_cambios_description = """
-Devuelve el historial de altas, bajas y modificaciones de medicamentos a partir de la fecha indicada y/o para un Nº de registro concreto.
+registro_cambios_description = """\
+Historial de altas, bajas y modificaciones de medicamentos a partir de
+una fecha y/o para un nregistro concreto.
 
-**Uso**
-- Envía los filtros como parámetros de consulta en un GET.
-- `fecha` (opcional): fecha mínima de consulta en formato `dd/mm/yyyy`.
-- `nregistro` (opcional): Número de registro AEMPS (solo dígitos).
-- `metodo` (requerido): método HTTP interno a usar (`GET` o `POST`; por defecto `GET`).
+Cuando usar: necesitas detectar cambios regulatorios recientes (nuevas
+autorizaciones, retiradas, cambios de prospecto / ficha tecnica /
+problemas de suministro / notas de seguridad / materiales informativos).
 
-**Ejemplo**
-GET /registro-cambios?fecha=01/01/2025&nregistro=12345&metodo=POST
+Parametros:
+- `fecha` (str, opcional): fecha minima en formato `dd/mm/yyyy`.
+- `nregistro` (list[str] | str, opcional): uno o varios registros para
+  acotar la consulta.
+- `metodo` (str, opcional, defecto `GET`): metodo HTTP interno; usar
+  `POST` si la lista de nregistros es muy larga.
+
+Cada elemento devuelto trae:
+- `tipoCambio` (int): 1 nuevo, 2 baja, 3 modificado.
+- `cambios` (list[str]): etiquetas como `estado`, `comerc`, `prosp`,
+  `ft`, `psum`, `notasSeguridad`, `matinf`, `otros`.
+
+Fuente: AEMPS CIMA REST API v1.23 — `GET/POST /cima/rest/registroCambios`.
 """
 
-problemas_suministro_description = """
-Consulta el estado de suministro de presentaciones farmacéuticas, de forma global (con paginación) o para uno o varios Códigos Nacionales (CN).
-Priorizable usarlo por Código Nacional (cn).
+problemas_suministro_description = """\
+Estado de suministro de presentaciones farmaceuticas. Devuelve la lista
+global paginada o el detalle por uno o varios CNs / nregistros.
 
-**Uso**
-- **Global** (sin `cn`):
-  `GET /problemas-suministro[?pagina={n}&tamanioPagina={m}]`
-  - `pagina` y `tamanioPagina` controlan la paginación; sólo se aplican cuando no hay `cn`.
-- **Por CN**:
-  `GET /problemas-suministro?cn=654987&cn=712345`
+Cuando usar:
+- Sin parametros: snapshot global de problemas de suministro activos.
+- Con `cn=[...]`: detalle por presentacion (preferido — el endpoint
+  oficial trabaja por codigo nacional).
+- Con `nregistro=[...]`: el wrapper resuelve cada nregistro a sus CNs
+  asociados y consulta cada uno.
 
-**Parámetros**
-- `cn` (List[str], opcional): uno o varios Códigos Nacionales (solo dígitos). Repite `cn` por cada valor.
-- `pagina` (int, opcional, defecto=1): número de página de resultados (sólo sin `cn`). Valor mínimo 1.
-- `tamanioPagina` (int, opcional, defecto=10): número de elementos por página (sólo sin `cn`). Rango 1–100.
+Parametros (todos opcionales):
+- `cn` (list[str]): uno o varios Codigos Nacionales.
+- `nregistro` (list[str]): uno o varios numeros de registro AEMPS.
+- `pagina` (int >=1, defecto 1) — solo aplica al listado global.
+- `tamanioPagina` (int 1..100, defecto 25) — solo aplica al listado
+  global.
+
+Cada presentacion con problema activo expone:
+- `tipoProblemaSuministro` (int 1..9): tipo segun tabla AEMPS (1 nota
+  informativa, 2 solo hospitales, 3 valorar tratamiento alternativo,
+  4 desabastecimiento temporal, 5 existe alternativa con mismo p.activo,
+  6 existen alternativas con mismos p.activos, 7 medicamento extranjero,
+  8 prescripcion restringida, 9 distribucion controlada).
+- `fini` / `ffin` (epoch ms): inicio y fin previsto del problema.
+- `activo` (bool), `observ` (str).
+
+Fuente: AEMPS CIMA Problemas Suministro v1.01 — `GET /cima/rest/psuministro`
+y `GET /cima/rest/psuministro/v2/cn/{cn}` (con fallback v1 si v2 falla).
 """
 
-problemas_suministro_dcp_description = """
-Devuelve las presentaciones comercializadas **y** las que tienen problemas de suministro activos para un **DCP** (Descripción Clínica del Producto).
+problemas_suministro_dcp_description = """\
+Resumen de presentaciones comercializadas y con problemas de suministro
+activos para un DCP (Descripcion Clinica del Producto: principio activo
++ dosis + forma sin formato).
 
-**Uso**
-```
-GET /problemas-suministro/dcp/{cod_dcp}
-```
+Cuando usar: trabajas con codigos clinicos DCP en lugar de Codigo
+Nacional y quieres saber, agregando todas las presentaciones de ese
+DCP, cuantas estan comercializadas y cuantas tienen problema activo.
 
-**Parámetro**
-- `cod_dcp` (str, **requerido**): código DCP asignado por AEMPS (identificador del principio activo + dosis + forma farmacéutica).
+Parametro:
+- `cod_dcp` (str, obligatorio, solo digitos): codigo DCP AEMPS.
 
-**Respuesta**
-- `comercializados`: presentaciones comercializadas para ese DCP.
-- `con_psuministro`: presentaciones con problema de suministro activo.
+Respuesta:
+- `comercializados` (int): n.o de presentaciones comercializadas.
+- `con_psuministro` (int): n.o de presentaciones con problema de
+  suministro activo.
 
-**Fuente**: AEMPS CIMA — `GET /psuministro/v2/dcp/{cod_dcp}` (API Problemas Suministro v1.01)
+Fuente: AEMPS CIMA Problemas Suministro v1.01 —
+`GET /cima/rest/psuministro/v2/dcp/{cod_dcp}`.
 """
 
-problemas_suministro_dcpf_description = """
-Devuelve las presentaciones comercializadas **y** las que tienen problemas de suministro activos para un **DCPF** (Descripción Clínica del Producto con Forma Farmacéutica).
+problemas_suministro_dcpf_description = """\
+Resumen de presentaciones comercializadas y con problemas de suministro
+activos para un DCPF (Descripcion Clinica del Producto con Formato:
+principio activo + dosis + forma farmaceutica especifica).
 
-**Uso**
-```
-GET /problemas-suministro/dcpf/{cod_dcpf}
-```
+Cuando usar: trabajas con codigos clinicos DCPF (mas especificos que el
+DCP) y quieres el agregado por presentacion comercializada / con
+problema activo.
 
-**Parámetro**
-- `cod_dcpf` (str, **requerido**): código DCPF asignado por AEMPS.
+Parametro:
+- `cod_dcpf` (str, obligatorio, solo digitos): codigo DCPF AEMPS.
 
-**Respuesta**
-- `comercializados`: presentaciones comercializadas para ese DCPF.
-- `con_psuministro`: presentaciones con problema de suministro activo.
+Respuesta:
+- `comercializados` (int)
+- `con_psuministro` (int)
 
-**Fuente**: AEMPS CIMA — `GET /psuministro/v2/dcpf/{cod_dcpf}` (API Problemas Suministro v1.01)
+Fuente: AEMPS CIMA Problemas Suministro v1.01 —
+`GET /cima/rest/psuministro/v2/dcpf/{cod_dcpf}`.
 """
 
-doc_secciones_description = """
-Lista los metadatos de secciones disponibles para un tipo de documento y medicamento indicados.
+doc_secciones_description = """\
+Metadatos de las secciones disponibles para un tipo de documento de
+uno o varios medicamentos. NO incluye el contenido — usa
+`doc_contenido` para descargarlo.
 
-**Uso**
-- Envía los filtros como parámetros de consulta en un GET.
-- Se requiere al menos uno de `nregistro` o `cn`.
+Cuando usar: quieres saber que secciones existen (numero, titulo,
+orden) en la ficha tecnica o prospecto antes de pedir el contenido,
+o necesitas comparar disponibilidad de secciones entre medicamentos.
 
-**Parámetros**
-- `tipo_doc` (int, path; 1–4, **requerido**):
-  - 1 = Ficha Técnica
-  - 2 = Prospecto
-  - 3–4 = Otros
-- `nregistro` (str, query, opcional): Número de registro AEMPS (solo dígitos).
-- `cn` (str, query, opcional): Código Nacional (solo dígitos).
+Parametros:
+- `tipo_doc` (int, obligatorio):
+  - 1 Ficha Tecnica
+  - 2 Prospecto
+  - 3 Informe Publico de Evaluacion (IPE)
+  - 4 Plan de Gestion de Riesgos (PGR)
+- `nregistro` (list[str], opcional): uno o varios numeros de registro.
+- `cn` (list[str], opcional): uno o varios Codigos Nacionales (el
+  wrapper resuelve CN -> nregistro automaticamente).
 
-**Ejemplo**
-```
-GET /doc-secciones/1?nregistro=12345
-```
+Se requiere al menos uno entre `nregistro` o `cn`.
+
+Fuente: AEMPS CIMA REST API v1.23 —
+`GET /cima/rest/docSegmentado/secciones/{tipoDoc}`.
 """
 
-doc_contenido_description = """
-Devuelve el contenido de secciones de un documento (Ficha Técnica, Prospecto u otros).
+doc_contenido_description = """\
+Contenido de una seccion (o todas) de un documento segmentado: ficha
+tecnica o prospecto.
 
-**Uso**
-- Envía los filtros como parámetros de consulta en un GET.
-- Se requiere al menos uno de `nregistro` o `cn`.
-- Si no se indica `seccion`, devuelve todas las secciones.
+Cuando usar: ya sabes que seccion necesitas (p.ej. `4.2` posologia) y
+quieres su contenido textual. Si `seccion` se omite, devuelve TODAS
+las secciones.
 
-**Parámetros**
-- `tipo_doc` (int, path; 1–2, **requerido**):
-  - 1 = Ficha Técnica
-  - 2 = Prospecto
-- `nregistro` (str, query, opcional): Número de registro AEMPS (solo dígitos).
-- `cn` (str, query, opcional): Código Nacional (solo dígitos).
-- `seccion` (str, query, opcional): ID de sección (p. ej. "4.2").
-- `format` (str, query, opcional): formato de respuesta: `json` (por defecto), `html` o `txt`.
+Parametros:
+- `tipo_doc` (int, obligatorio): 1 Ficha Tecnica, 2 Prospecto.
+- `nregistro` (str, opcional, digitos) o `cn` (str, opcional, digitos).
+  Se requiere uno de los dos; si se da `cn`, se resuelve a `nregistro`.
+- `seccion` (str, opcional): ID de la seccion (`N` o `N.N`, p.ej.
+  `"4.2"`). Si vacio, devuelve todas las secciones.
+- `format` (str, opcional, defecto `json`): `json` (estructurado),
+  `html` (solo HTML del contenido) o `txt` (texto plano).
 
-**Ejemplo**
-```
-GET /doc-contenido/2?cn=654321&seccion=5.1
-Accept: application/json
-```
+Fuente: AEMPS CIMA REST API v1.23 —
+`GET /cima/rest/docSegmentado/contenido/{tipoDoc}`.
 """
 
+listar_notas_description = """\
+Notas de seguridad publicadas por la AEMPS para uno o varios
+medicamentos.
 
-listar_notas_description = """
-Devuelve las notas de seguridad asociadas a uno o varios medicamentos, identificados por su número de registro AEMPS.
+Cuando usar: necesitas comprobar si la AEMPS ha emitido alertas /
+comunicados de seguridad sobre uno o varios medicamentos concretos.
 
-**Uso**
-- Envía uno o varios parámetros `nregistro` en la consulta:
-  - Un único registro: `GET /notas?nregistro=AAA`
-  - Varios registros: `GET /notas?nregistro=AAA&nregistro=BBB`
+Parametro:
+- `nregistro` (list[str], obligatorio): uno o varios numeros de
+  registro. Cada llamada se paraleliza.
 
-**Parámetro**
-- `nregistro` (List[str], **requerido**): uno o varios números de registro (dígitos o alfanuméricos según CIMA). Repite el parámetro por cada valor.
+Respuesta: `{nregistro: [notas...], ...}` mas un objeto `errores` con
+los registros que fallaron. Cada nota incluye `num`, `ref`, `asunto`,
+`fecha` (epoch ms) y `url` oficial AEMPS.
 
-**Comportamiento**
-- **Único registro**: devuelve la lista de notas de seguridad para ese registro.
-- **Múltiples registros**: realiza llamadas concurrentes y agrupa la respuesta en un objeto:
-  ```json
-  {
-    "AAA": [ …lista de notas… ],
-    "BBB": [ …lista de notas… ]
-  }
-  ```
+Fuente: AEMPS CIMA REST API v1.23 — `GET /cima/rest/notas/{nregistro}`.
 """
 
-obtener_notas_description = """
-Devuelve las notas de seguridad para uno o varios medicamentos, identificados por su número de registro AEMPS.
+obtener_notas_description = listar_notas_description  # alias backward-compat
 
-**Uso**
-- Envía el parámetro `nregistro` en la ruta:
-  - Múltiples registros separados por comas: `GET /notas/AAA,BBB,CCC`
+listar_materiales_description = """\
+Materiales informativos de seguridad asociados a uno o varios
+medicamentos (documentos para pacientes y profesionales sanitarios,
+videos formativos, etc.).
 
-**Parámetro**
-- `nregistro` (str, **requerido**): uno o varios números de registro separados por comas (solo dígitos o alfanuméricos según CIMA).
+Cuando usar: necesitas comprobar materiales de minimizacion de riesgos
+o documentacion educativa que la AEMPS asocia a un medicamento.
 
-**Comportamiento**
-- Divide la lista y llama individualmente a la API para cada registro.
-- Agrupa los resultados en un objeto y registra errores parciales.
+Parametro:
+- `nregistro` (list[str], obligatorio): uno o varios numeros de
+  registro. Cada llamada se paraleliza.
+
+Respuesta: lista plana con los materiales encontrados. Cada elemento
+trae `titulo`, `listaDocsPaciente`, `listaDocsProfesional` y, si
+aplica, `video`.
+
+Fuente: AEMPS CIMA REST API v1.23 —
+`GET /cima/rest/materiales/{nregistro}`.
 """
 
-listar_materiales_description = """
-Devuelve los materiales informativos asociados a uno o varios medicamentos, identificados por su número de registro AEMPS.
+obtener_materiales_description = listar_materiales_description  # alias
 
-**Uso**
-- Envía uno o varios parámetros `nregistro` como consulta:
-  - Un solo registro: `GET /materiales?nregistro=AAA`
-  - Varios registros: `GET /materiales?nregistro=AAA&nregistro=BBB`
+html_ft_description = """\
+HTML completo de la ficha tecnica de un medicamento.
 
-**Parámetro**
-- `nregistro` (List[str], **requerido**): uno o varios números de registro (dígitos o alfanuméricos según CIMA). Repite el parámetro por cada valor.
+Cuando usar: necesitas el documento integro (no segmentado por
+secciones) para mostrarlo al usuario o para procesamiento downstream.
+Si solo quieres una seccion concreta, prefiere `doc_contenido`.
 
-**Comportamiento**
-- **Único registro**: devuelve la lista de materiales para ese registro.
-- **Múltiples registros**: llamadas concurrentes y agrupa la respuesta en un objeto:
-  ```json
-  {
-    "AAA": [ /* lista de materiales */ ],
-    "BBB": [ /* lista de materiales */ ]
-  }
-  ```
+Parametros:
+- `nregistro` (str, obligatorio): numero de registro AEMPS.
+- `filename` (str, opcional, defecto `FichaTecnica.html`).
+
+Fuente: AEMPS — `GET https://cima.aemps.es/cima/dochtml/ft/{nregistro}/FichaTecnica.html`.
 """
 
-obtener_materiales_description = """
-Devuelve los materiales informativos asociados a un único medicamento, identificado por su número de registro AEMPS.
+html_ft_multiple_description = html_ft_description  # alias backward-compat
 
-**Uso**
-```
-GET /materiales/{nregistro}
-```
+html_p_description = """\
+HTML completo del prospecto de un medicamento.
 
-**Parámetro**
-- `nregistro` (str, **requerido**): número de registro AEMPS (dígitos o alfanuméricos según CIMA).
+Cuando usar: necesitas el prospecto integro. Si solo quieres una
+seccion, prefiere `doc_contenido(tipo_doc=2, ...)`.
+
+Parametros:
+- `nregistro` (str, obligatorio): numero de registro AEMPS.
+- `filename` (str, opcional, defecto `Prospecto.html`).
+
+Fuente: AEMPS — `GET https://cima.aemps.es/cima/dochtml/p/{nregistro}/Prospecto.html`.
 """
 
-html_ft_multiple_description = """
-Descarga o devuelve el HTML completo de la ficha técnica para uno o varios medicamentos.
+html_p_multiple_description = html_p_description  # alias backward-compat
 
-**Uso**
-- Múltiples registros: `GET /doc-html/ft?nregistro=AAA&nregistro=BBB&filename=FichaTecnica.html`
-- Único registro: si solo hay un `nregistro`, devuelve directamente el HTML.
+system_info_prompt_description = """\
+Devuelve `MCP_AEMPS_SYSTEM_PROMPT`: catalogo de herramientas, flujos
+recomendados y pautas de respuesta para un agente regulatorio
+farmaceutico operando sobre AEMPS / CIMA.
 
-**Parámetros**
-- `nregistro` (List[str], **requerido**): uno o varios números de registro AEMPS; repite el parámetro por cada valor.
-- `filename` (str, **requerido**): nombre del archivo HTML deseado (p.ej. "FichaTecnica.html").
-
-**Comportamiento**
-- **Registro único** (`len(nregistro)==1`): devuelve un `StreamingResponse` con `media_type="text/html"` y el contenido HTML.
-- **Múltiples registros**: genera en paralelo el HTML de cada ficha y devuelve un archivo ZIP con las páginas.
-"""
-
-html_ft_description = """
-Obtiene el HTML completo de la ficha técnica de un único medicamento.
-
-**Uso**
-```
-GET /doc-html/ft/{nregistro}/{filename}
-```
-
-**Parámetros**
-- `nregistro` (str, **requerido**): número de registro AEMPS.
-- `filename` (str, **requerido**): nombre de archivo HTML (p.ej. "FichaTecnica.html").
-
-"""
-
-html_p_multiple_description = """
-Descarga o devuelve el HTML completo del prospecto para uno o varios medicamentos.
-
-**Uso**
-- Varios registros: `GET /doc-html/p?nregistro=AAA&nregistro=BBB&filename=Prospecto.html`
-- Único registro: si solo se incluye un `nregistro`, se devuelve directamente el HTML.
-
-**Parámetros**
-- `nregistro` (List[str], **requerido**): uno o varios números de registro AEMPS; repite el parámetro por cada valor.
-- `filename` (str, **requerido**): nombre de archivo HTML deseado (p.ej. "Prospecto.html" o sección específica).
-
-**Comportamiento**
-- **Registro único** (`len(nregistro)==1`): devuelve un `StreamingResponse` con `media_type="text/html"` y el contenido HTML.
-- **Múltiples registros**: genera en paralelo el HTML de cada prospecto y devuelve un archivo ZIP con las páginas.
-"""
-
-html_p_description = """
-Obtiene el HTML completo del prospecto para un único medicamento.
-
-**Uso**
-```
-GET /doc-html/p/{nregistro}/{filename}
-```
-
-**Parámetros**
-- `nregistro` (str, **requerido**): número de registro AEMPS.
-- `filename` (str, **requerido**): nombre de archivo HTML (p.ej. "Prospecto.html" o sección específica).
-"""
-
-system_info_prompt_description = """
-Devuelve el `MCP_AEMPS_SYSTEM_PROMPT`, que contiene:
-- Descripción completa de las herramientas MCP disponibles.
-- Flujo recomendado para el uso de cada una.
-- Pautas y descargos de responsabilidad para las respuestas producidas por el agente.
-
-**Uso**:
-- Invoca este endpoint para obtener el prompt base que utiliza el agente farmacéutico digital.
+Cuando usar: el cliente MCP quiere reinyectar el prompt base del
+servidor (p.ej. tras una compactacion) o exponerlo como contexto
+estatico.
 """
