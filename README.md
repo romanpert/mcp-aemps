@@ -40,8 +40,8 @@ pip install mcp-aemps
 uvx mcp-aemps up
 pipx run mcp-aemps up
 
-# Docker
-docker run -p 8000:8000 ghcr.io/romanpert/mcp-aemps:latest
+# Docker (multi-arch: linux/amd64, linux/arm64) — minimum 0.1.6
+docker run -p 8765:8765 ghcr.io/romanpert/mcp-aemps:latest
 
 # Docker Compose
 docker compose up -d
