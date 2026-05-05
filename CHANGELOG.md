@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.5] — 2026-05-05
 
+> **⚠️ Docker users:** the `0.1.5` GHCR image had a broken multi-arch
+> manifest (only `linux/arm64` was actually published — `amd64` pulls
+> failed with "no matching manifest"). The image was withdrawn on
+> 2026-05-05. **Use `0.1.6` or later.** PyPI install was unaffected.
+
 ### Added
 - **Docker, multi-stage**: new `Dockerfile` (~150 MB final image, was ~280 MB) +
   `.dockerignore`. Non-root UID 10001, healthcheck via curl.
