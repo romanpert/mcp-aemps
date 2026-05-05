@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [project]
 name = "mcp-aemps"
-version = "0.1.5"
+version = "0.1.6"
 description = "Open-source MCP server for the Spanish AEMPS CIMA pharmaceutical registry"
 authors = [
   { name = "Román Pérez Dumpert", email = "roman.p98@gmail.com" }

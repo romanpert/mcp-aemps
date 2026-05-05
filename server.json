@@ -8,13 +8,13 @@
     "url": "https://github.com/romanpert/mcp-aemps",
     "source": "github"
   },
-  "version": "0.1.5",
+  "version": "0.1.6",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "mcp-aemps",
-      "version": "0.1.5",
+      "version": "0.1.6",
       "runtimeHint": "uvx",
       "transport": {
         "type": "streamable-http",

@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6] — 2026-05-05
+
+### Fixed
+- **Docker multi-arch image was broken** in v0.1.5: the build matrix
+  (`linux/amd64`, `linux/arm64`) made each job push to the same tag, the
+  last writer winning. Resulting manifest only had `arm64` (`docker pull`
+  on x86 returned "no matching manifest for linux/amd64"). Replaced with a
+  single Buildx job that emits a real multi-arch manifest list.
+
 ## [0.1.5] — 2026-05-05
 
 ### Added
@@ -177,6 +186,7 @@ First public release.
   `Permissions-Policy`.
 - No PII processed: CIMA exposes medicine metadata only.
 
+[0.1.6]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.1.6
 [0.1.5]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.1.5
 [0.1.4]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.1.4
 [0.1.3]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.1.3
