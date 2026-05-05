@@ -5,6 +5,7 @@ Community Edition: console + rotating file handler with gzip compression.
 No OTel coupling. Enterprise editions add OTel correlation by replacing
 the formatter through a startup hook.
 """
+
 from __future__ import annotations
 
 import gzip

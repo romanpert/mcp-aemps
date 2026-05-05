@@ -10,6 +10,7 @@ Supported clients:
 - Claude Code     (CLI command preferred, fallback to ~/.claude.json edit)
 - OpenAI Codex    (~/.codex/config.toml or environment-driven config)
 """
+
 from __future__ import annotations
 
 import json
@@ -133,9 +134,13 @@ def install_claude_code(
     if cli_allowed and _claude_cli_available():
         try:
             cmd = [
-                "claude", "mcp", "add",
-                "--scope", scope,
-                "--transport", "http",
+                "claude",
+                "mcp",
+                "add",
+                "--scope",
+                scope,
+                "--transport",
+                "http",
                 server_key,
                 url,
             ]
@@ -197,11 +202,7 @@ def install_codex(
     path.parent.mkdir(parents=True, exist_ok=True)
     existing_text = path.read_text(encoding="utf-8") if path.exists() else ""
 
-    block = (
-        f"\n[mcp_servers.{server_key}]\n"
-        f'url = "{url}"\n'
-        f'transport = "http"\n'
-    )
+    block = f'\n[mcp_servers.{server_key}]\nurl = "{url}"\ntransport = "http"\n'
     header = f"[mcp_servers.{server_key}]"
 
     if header in existing_text:
@@ -241,7 +242,9 @@ def install_codex(
 # ---------------------------------------------------------------------------
 # Uninstallers
 # ---------------------------------------------------------------------------
-def uninstall_claude_desktop(*, server_key: str = SERVER_KEY, config_path: Path | None = None) -> InstallResult:
+def uninstall_claude_desktop(
+    *, server_key: str = SERVER_KEY, config_path: Path | None = None
+) -> InstallResult:
     path = config_path or claude_desktop_config_path()
     config = _read_json(path)
     servers = config.get("mcpServers", {})
@@ -253,17 +256,24 @@ def uninstall_claude_desktop(*, server_key: str = SERVER_KEY, config_path: Path 
 
 
 def uninstall_claude_code(
-    *, server_key: str = SERVER_KEY, config_path: Path | None = None, use_cli: bool | None = None,
+    *,
+    server_key: str = SERVER_KEY,
+    config_path: Path | None = None,
+    use_cli: bool | None = None,
 ) -> InstallResult:
     cli_allowed = config_path is None and (use_cli is None or use_cli)
     if cli_allowed and _claude_cli_available():
         try:
             result = subprocess.run(
                 ["claude", "mcp", "remove", server_key],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             if result.returncode == 0:
-                return InstallResult("Claude Code", Path("(via `claude mcp remove`)"), "removed", f"{server_key} removed")
+                return InstallResult(
+                    "Claude Code", Path("(via `claude mcp remove`)"), "removed", f"{server_key} removed"
+                )
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
 

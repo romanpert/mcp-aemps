@@ -17,6 +17,7 @@ hooks — without forking the core:
         shutdown_hooks=[close_audit_log],
     )
 """
+
 from __future__ import annotations
 
 from typing import Any, Awaitable, Callable, Sequence, Tuple, Type, Union

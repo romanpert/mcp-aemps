@@ -8,6 +8,7 @@ Enterprise editions inject extra hooks (OTel init, audit log flush,
 external connection pools, etc.) via the `startup_hooks` and `shutdown_hooks`
 parameters of `build_lifespan` — without forking this module.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -59,9 +60,7 @@ def build_lifespan(
                 try:
                     await hook(app)
                 except Exception:
-                    logger.exception(
-                        "Shutdown hook %s failed", getattr(hook, "__name__", hook)
-                    )
+                    logger.exception("Shutdown hook %s failed", getattr(hook, "__name__", hook))
 
             for task_attr in ("warmup_task", "refresh_task"):
                 task = getattr(app.state, task_attr, None)

@@ -27,8 +27,8 @@ CN_RE = re.compile(r"^\d{6}$")
 HTML_BASE_URL = "https://cima.aemps.es/cima"
 
 _DOC_HTML_INFO: dict[int, tuple[str, str]] = {
-    1: ("ft",  "FT"),
-    2: ("p",   "P"),
+    1: ("ft", "FT"),
+    2: ("p", "P"),
     3: ("ipe", "IPE"),
     4: ("ipt", "IPT"),
 }
@@ -54,10 +54,7 @@ def build_dochtml_url(
 def _redact_query_params(params: Any) -> Any:
     try:
         if hasattr(params, "items"):
-            return {
-                k: "***REDACTED***" if str(k).lower() in SENSITIVE_KEYS else v
-                for k, v in params.items()
-            }
+            return {k: "***REDACTED***" if str(k).lower() in SENSITIVE_KEYS else v for k, v in params.items()}
     except Exception:
         pass
     return params
@@ -156,6 +153,29 @@ def parse_cima_fechas_list(items: list) -> None:
         parse_cima_fechas(item)
 
 
+async def bounded_gather(coros: list, *, limit: int | None = None, return_exceptions: bool = True) -> list:
+    """Like asyncio.gather but caps concurrency at `limit`.
+
+    Use in batch route handlers (e.g. /notas with multiple nregistros) to
+    prevent a single batch request from spawning N parallel CIMA calls. The
+    global CIMA_FANOUT_SEMAPHORE in cima_client provides a server-wide cap;
+    this provides a per-request cap so one user's batch can't monopolise
+    the upstream pool.
+    """
+    if limit is None:
+        from app.rate_limits import BATCH_FANOUT_LIMIT
+
+        limit = BATCH_FANOUT_LIMIT
+
+    sem = asyncio.Semaphore(limit)
+
+    async def _wrap(coro):
+        async with sem:
+            return await coro
+
+    return await asyncio.gather(*(_wrap(c) for c in coros), return_exceptions=return_exceptions)
+
+
 async def safe_cima_call(func, *args, **kwargs) -> Any:
     """Wrapper seguro para llamadas a CIMA con manejo robusto de errores."""
     try:
@@ -183,7 +203,9 @@ async def safe_cima_call(func, *args, **kwargs) -> Any:
 
     except (httpx.RequestError, asyncio.TimeoutError) as exc:
         logger.error("Error de red/timeout con API externa: %s: %s", exc.__class__.__name__, exc)
-        raise HTTPException(status_code=503, detail="Servicio no disponible: No se pudo conectar con la API externa")
+        raise HTTPException(
+            status_code=503, detail="Servicio no disponible: No se pudo conectar con la API externa"
+        )
 
     except ValueError as exc:
         logger.error("Error de validacion en parametros: %s", exc)
@@ -237,10 +259,7 @@ async def normalize_nregistro_and_cn(
     try:
         pres = await cima.presentacion(candidate_cn)
         if isinstance(pres, dict):
-            nr = (
-                pres.get("nregistro")
-                or pres.get("data", {}).get("nregistro")
-            )
+            nr = pres.get("nregistro") or pres.get("data", {}).get("nregistro")
             if nr:
                 resolved = str(nr).strip()
                 if resolved:

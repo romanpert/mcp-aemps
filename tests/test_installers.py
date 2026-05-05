@@ -3,6 +3,7 @@
 Always pass `config_path` to keep tests hermetic — never touches the user's
 real Claude / Codex configs.
 """
+
 from __future__ import annotations
 
 import json

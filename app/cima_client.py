@@ -4,6 +4,7 @@ Cliente asincrono para la API REST oficial de CIMA (AEMPS).
 Endpoints documentados en CIMA REST API v1.23.
 Transport: httpx (sin aiohttp).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -24,6 +25,10 @@ BASE_URL = "https://cima.aemps.es/cima/rest"
 HTML_BASE_URL = "https://cima.aemps.es/cima"
 TIMEOUT = httpx.Timeout(15)
 
+# Connection pool against cima.aemps.es. Caps total upstream pressure regardless
+# of how many concurrent requests are spawned by route handlers.
+_CIMA_LIMITS = httpx.Limits(max_connections=20, max_keepalive_connections=10)
+
 TIPOS_PROBLEMA = {
     1: "Consultar Nota Informativa",
     2: "Suministro solo a hospitales",
@@ -42,6 +47,7 @@ _DEFAULT_HEADERS = {"Accept": "application/json", "User-Agent": "mcp-aemps/1.0"}
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _clean(params: Dict[str, Any] | None) -> Dict[str, Any] | None:
     if not params:
@@ -80,23 +86,33 @@ async def _request(
     json_body: Optional[Any] = None,
     client: Optional[httpx.AsyncClient] = None,
 ) -> Optional[Any]:
+    # Lazy import to avoid circulars: rate_limits imports config which is fine,
+    # but cima_client is a dep of cache which is a dep of factory; keep the
+    # global semaphore reference here.
+    from app.rate_limits import CIMA_FANOUT_SEMAPHORE
+
     owns_client = client is None
     if owns_client:
-        client = httpx.AsyncClient(timeout=TIMEOUT)
+        client = httpx.AsyncClient(timeout=TIMEOUT, limits=_CIMA_LIMITS)
 
     try:
         clean_params = _clean(params)
         full_url = f"{BASE_URL}/{path}"
 
         if logger.isEnabledFor(logging.DEBUG):
-            logger.debug("HTTP %s %s | params_keys=%s", method, path, sorted(list((clean_params or {}).keys())))
+            logger.debug(
+                "HTTP %s %s | params_keys=%s", method, path, sorted(list((clean_params or {}).keys()))
+            )
 
-        resp = await client.request(
-            method, full_url, params=clean_params, json=json_body, headers=_DEFAULT_HEADERS
-        )
+        async with CIMA_FANOUT_SEMAPHORE:
+            resp = await client.request(
+                method, full_url, params=clean_params, json=json_body, headers=_DEFAULT_HEADERS
+            )
 
         if logger.isEnabledFor(logging.DEBUG):
-            clen = resp.headers.get("Content-Length") or (len(resp.content) if resp.content is not None else 0)
+            clen = resp.headers.get("Content-Length") or (
+                len(resp.content) if resp.content is not None else 0
+            )
             logger.debug("HTTP %s %s | status=%s | bytes=%s", method, path, resp.status_code, clen)
 
         resp.raise_for_status()
@@ -110,12 +126,15 @@ async def _request(
             return resp.text
 
     except httpx.HTTPStatusError as e:
-        logger.error("HTTPStatusError status=%s path=%s", e.response.status_code, path,
-                     exc_info=settings.log_stacktraces)
+        logger.error(
+            "HTTPStatusError status=%s path=%s",
+            e.response.status_code,
+            path,
+            exc_info=settings.log_stacktraces,
+        )
         raise
     except httpx.RequestError as e:
-        logger.error("RequestError (%s) path=%s", type(e).__name__, path,
-                     exc_info=settings.log_stacktraces)
+        logger.error("RequestError (%s) path=%s", type(e).__name__, path, exc_info=settings.log_stacktraces)
         raise
     finally:
         if owns_client:
@@ -267,6 +286,7 @@ async def registro_cambios(
 #       GET /psuministro/v2/dcpf/{cod_dcpf} → por DCPF (descripcion clinica con formato)
 # ---------------------------------------------------------------------------
 
+
 def _enrich_psuministro(item: dict) -> None:
     """Normaliza fechas y añade descripcion textual del tipo de problema."""
     observ = item.get("observ", "").lower()
@@ -291,7 +311,8 @@ def _enrich_psuministro(item: dict) -> None:
 async def psuministro_global(pagina: int = 1, tamanioPagina: int = 25) -> dict:
     """GET /psuministro — listado global paginado (v1)."""
     raw = await _request(
-        "GET", "psuministro",
+        "GET",
+        "psuministro",
         params={"pagina": pagina, "tamanioPagina": tamanioPagina},
     )
     if raw is None:
@@ -433,6 +454,7 @@ async def doc_contenido(
 
         if format == "txt":
             import re as _re
+
             if isinstance(result, list) and result:
                 parts = []
                 for sec in result:
@@ -469,6 +491,7 @@ async def notas(nregistro: str) -> Any | None:
 # ---------------------------------------------------------------------------
 async def materiales(nregistro: Union[str, List[str]]) -> Any | None:
     """GET /materiales?nregistro={nregistro} o GET /materiales/{nregistro}"""
+
     async def _fetch_one(nr: str) -> list | None:
         try:
             data = await _request("GET", "materiales", params={"nregistro": nr})
@@ -530,4 +553,3 @@ async def get_html_bytes(
         resp = await client.get(url, follow_redirects=True)
         resp.raise_for_status()
         return resp.content
-

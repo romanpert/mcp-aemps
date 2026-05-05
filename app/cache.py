@@ -8,6 +8,7 @@ The selection is automatic — if REDIS_URL is set and reachable, Redis is used;
 otherwise the server falls back to in-memory and continues working with no
 external dependencies.
 """
+
 from __future__ import annotations
 
 import asyncio
