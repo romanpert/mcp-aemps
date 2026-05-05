@@ -22,13 +22,14 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable, Sequence, Tuple, Type, Union
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi_mcp import FastApiMCP
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
+from app.core import OperationError
 from app.lifespan import build_lifespan
 from app.logging_setup import configure_logging
 
@@ -79,6 +80,10 @@ def create_app(
     from app.metrics import METRICS, metrics_middleware
 
     app.middleware("http")(metrics_middleware)
+
+    @app.exception_handler(OperationError)
+    async def _operation_error_handler(request: Request, exc: OperationError):  # noqa: D401, ARG001
+        return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
 
     @app.get("/health", include_in_schema=False)
     async def health():  # noqa: D401

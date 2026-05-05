@@ -1,15 +1,16 @@
 # app/stdio_server.py
 """Native stdio MCP server.
 
-The Anthropic-canonical MCP usage pattern is `uvx mcp-aemps stdio`: the
-client (Claude Desktop, Codex, …) launches us as a subprocess and talks
-JSON-RPC over stdin/stdout. This module implements exactly that, exposing
-every official CIMA tool as an MCP tool — no HTTP server, no bridge, no
-external proxy.
+Anthropic-canonical pattern: ``uvx mcp-aemps stdio`` runs us as a
+subprocess speaking JSON-RPC over stdin/stdout. Every tool here is a
+thin wrapper over the matching ``app.core.core_<op>`` — same code path
+as the HTTP server in ``app.factory``. Adding a tool means implementing
+one ``core_<op>``; both transports pick it up automatically as long as
+they call it.
 
-The HTTP server (`mcp-aemps up`) and this stdio server share the same
-underlying CIMA client (`app.cima_client`) and metadata helpers, so a tool
-call returns the same JSON shape regardless of transport.
+Errors raised by core handlers (``OperationError``) are serialised to a
+dict so the LLM gets a structured payload instead of an opaque
+exception traceback.
 
 Run with:  python -m app.stdio_server
 Or via:    mcp-aemps stdio
@@ -18,22 +19,35 @@ Or via:    mcp-aemps stdio
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from mcp.server.fastmcp import FastMCP
 
-import app.cima_client as cima
-from app.config import settings
-from app.helpers import (
-    API_PSUM_VERSION,
-    _build_metadata,
-    bounded_gather,
-    format_response,
-    normalize_nregistro_and_cn,
-    parse_cima_fechas,
-    parse_cima_fechas_list,
-    safe_cima_call,
+from app.core import (
+    OperationError,
+    core_buscar_en_ficha_tecnica,
+    core_buscar_medicamentos,
+    core_buscar_vmpp,
+    core_consultar_maestras,
+    core_doc_contenido,
+    core_doc_secciones,
+    core_html_ficha_tecnica,
+    core_html_ficha_tecnica_multiple,
+    core_html_prospecto,
+    core_html_prospecto_multiple,
+    core_listar_materiales,
+    core_listar_notas,
+    core_listar_presentaciones,
+    core_obtener_materiales,
+    core_obtener_medicamento,
+    core_obtener_notas,
+    core_obtener_presentacion,
+    core_problemas_suministro,
+    core_problemas_suministro_dcp,
+    core_problemas_suministro_dcpf,
+    core_registro_cambios,
 )
 from app.logging_setup import configure_logging
 from app.mcp_constants import (
@@ -42,12 +56,16 @@ from app.mcp_constants import (
     doc_contenido_description,
     doc_secciones_description,
     html_ft_description,
+    html_ft_multiple_description,
     html_p_description,
+    html_p_multiple_description,
     listar_materiales_description,
     listar_notas_description,
     maestras_description,
     medicamento_description,
     medicamentos_description,
+    obtener_materiales_description,
+    obtener_notas_description,
     presentacion_description,
     presentaciones_description,
     problemas_suministro_dcp_description,
@@ -60,63 +78,83 @@ from app.mcp_constants import (
 logger = logging.getLogger(__name__)
 
 
+def _serialize_errors(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+    """Translate ``OperationError`` into a dict so the LLM gets actionable text.
+
+    Anything else propagates — FastMCP turns it into a tool error response
+    with the traceback redacted, which is the right behaviour for genuine bugs.
+    """
+
+    @functools.wraps(func)
+    async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return await func(*args, **kwargs)
+        except OperationError as exc:
+            return exc.to_dict()
+
+    return wrapper
+
+
 def build_server() -> FastMCP:
-    """Construct the FastMCP server with all official CIMA tools."""
-    server = FastMCP(
-        name="mcp-aemps",
-        instructions=MCP_AEMPS_SYSTEM_PROMPT,
-    )
+    """Construct the FastMCP server with every official CIMA tool."""
+    server = FastMCP(name="mcp-aemps", instructions=MCP_AEMPS_SYSTEM_PROMPT)
 
     # ------------------------------------------------------------------
     # Medicamentos
     # ------------------------------------------------------------------
     @server.tool(description=medicamento_description)
+    @_serialize_errors
     async def obtener_medicamento(
         cn: str | None = None,
         nregistro: str | None = None,
     ) -> dict[str, Any]:
-        if not (cn or nregistro):
-            return {"error": "Se requiere 'cn' o 'nregistro'."}
-        result = await safe_cima_call(cima.medicamento, cn=cn, nregistro=nregistro)
-        parse_cima_fechas(result)
-        params = {k: v for k, v in {"cn": cn, "nregistro": nregistro}.items() if v}
-        return format_response(result, _build_metadata(params))
+        return await core_obtener_medicamento(cn=cn, nregistro=nregistro)
 
     @server.tool(description=medicamentos_description)
+    @_serialize_errors
     async def buscar_medicamentos(
         nombre: str | None = None,
         laboratorio: str | None = None,
         practiv1: str | None = None,
         practiv2: str | None = None,
         idpractiv1: str | None = None,
+        idpractiv2: str | None = None,
         atc: str | None = None,
         cn: str | None = None,
         nregistro: str | None = None,
+        npactiv: int | None = None,
         triangulo: int | None = None,
         huerfano: int | None = None,
         biosimilar: int | None = None,
+        sust: int | None = None,
+        vmp: str | None = None,
         comerc: int | None = None,
+        autorizados: int | None = None,
         receta: int | None = None,
         estupefaciente: int | None = None,
         psicotropo: int | None = None,
+        estuopsico: int | None = None,
         pagina: int = 1,
     ) -> dict[str, Any]:
-        params = {k: v for k, v in locals().items() if v is not None}
-        result = await safe_cima_call(cima.medicamentos, **params)
-        if isinstance(result, dict) and "resultados" in result:
-            parse_cima_fechas_list(result["resultados"])
-            result["resultados"] = result["resultados"][: settings.max_results]
-        return format_response(result, _build_metadata(params))
+        return await core_buscar_medicamentos(
+            nombre=nombre, laboratorio=laboratorio, practiv1=practiv1, practiv2=practiv2,
+            idpractiv1=idpractiv1, idpractiv2=idpractiv2, atc=atc, cn=cn, nregistro=nregistro,
+            npactiv=npactiv, triangulo=triangulo, huerfano=huerfano, biosimilar=biosimilar,
+            sust=sust, vmp=vmp, comerc=comerc, autorizados=autorizados, receta=receta,
+            estupefaciente=estupefaciente, psicotropo=psicotropo, estuopsico=estuopsico,
+            pagina=pagina,
+        )
 
     @server.tool(description=buscar_ficha_tecnica_description)
+    @_serialize_errors
     async def buscar_en_ficha_tecnica(reglas: list[dict[str, Any]]) -> dict[str, Any]:
-        result = await safe_cima_call(cima.buscar_en_ficha_tecnica, reglas)
-        return format_response(result, _build_metadata({"reglas": reglas}))
+        return await core_buscar_en_ficha_tecnica(reglas)
 
     # ------------------------------------------------------------------
     # Presentaciones / VMP / Maestras
     # ------------------------------------------------------------------
     @server.tool(description=presentaciones_description)
+    @_serialize_errors
     async def listar_presentaciones(
         cn: str | None = None,
         nregistro: str | None = None,
@@ -124,31 +162,24 @@ def build_server() -> FastMCP:
         vmpp: str | None = None,
         idpractiv1: str | None = None,
         comerc: int | None = None,
+        estupefaciente: int | None = None,
+        psicotropo: int | None = None,
+        estuopsico: int | None = None,
         pagina: int = 1,
     ) -> dict[str, Any]:
-        params = {k: v for k, v in locals().items() if v is not None}
-        result = await safe_cima_call(cima.presentaciones, **params)
-        return format_response(result, _build_metadata(params))
+        return await core_listar_presentaciones(
+            cn=cn, nregistro=nregistro, vmp=vmp, vmpp=vmpp, idpractiv1=idpractiv1,
+            comerc=comerc, estupefaciente=estupefaciente, psicotropo=psicotropo,
+            estuopsico=estuopsico, pagina=pagina,
+        )
 
     @server.tool(description=presentacion_description)
+    @_serialize_errors
     async def obtener_presentacion(cn: list[str]) -> dict[str, Any]:
-        if not cn:
-            return {"error": "Se requiere al menos un 'cn'."}
-        coros = [safe_cima_call(cima.presentacion, c) for c in cn]
-        responses = await bounded_gather(coros)
-        data: dict[str, Any] = {}
-        errors: dict[str, str] = {}
-        for c, resp in zip(cn, responses):
-            if isinstance(resp, Exception):
-                errors[c] = str(resp)
-            else:
-                data[c] = resp
-        payload: dict[str, Any] = {"data": data}
-        if errors:
-            payload["errors"] = errors
-        return format_response(payload, _build_metadata({"cn": cn}))
+        return await core_obtener_presentacion(cn=cn)
 
     @server.tool(description=vmpp_description)
+    @_serialize_errors
     async def buscar_vmpp(
         practiv1: str | None = None,
         idpractiv1: str | None = None,
@@ -157,149 +188,100 @@ def build_server() -> FastMCP:
         atc: str | None = None,
         nombre: str | None = None,
         modoArbol: int | None = None,
-        pagina: int = 1,
+        pagina: int | None = None,
     ) -> dict[str, Any]:
-        params = {k: v for k, v in locals().items() if v is not None}
-        result = await safe_cima_call(cima.vmpp, **params)
-        return format_response(result, _build_metadata(params))
+        return await core_buscar_vmpp(
+            practiv1=practiv1, idpractiv1=idpractiv1, dosis=dosis, forma=forma,
+            atc=atc, nombre=nombre, modoArbol=modoArbol, pagina=pagina,
+        )
 
     @server.tool(description=maestras_description)
+    @_serialize_errors
     async def consultar_maestras(
-        maestra: int,
+        maestra: int | None = None,
         nombre: str | None = None,
         id: str | None = None,
         codigo: str | None = None,
         estupefaciente: int | None = None,
         psicotropo: int | None = None,
+        estuopsico: int | None = None,
         enuso: int | None = None,
         pagina: int = 1,
     ) -> dict[str, Any]:
-        params = {k: v for k, v in locals().items() if v is not None}
-        result = await safe_cima_call(cima.maestras, **params)
-        return format_response(result, _build_metadata(params))
+        return await core_consultar_maestras(
+            maestra=maestra, nombre=nombre, id=id, codigo=codigo,
+            estupefaciente=estupefaciente, psicotropo=psicotropo, estuopsico=estuopsico,
+            enuso=enuso, pagina=pagina,
+        )
 
     # ------------------------------------------------------------------
     # Vigilancia
     # ------------------------------------------------------------------
     @server.tool(description=registro_cambios_description)
+    @_serialize_errors
     async def registro_cambios(
         fecha: str | None = None,
         nregistro: list[str] | None = None,
         metodo: str = "GET",
     ) -> dict[str, Any]:
-        result = await safe_cima_call(cima.registro_cambios, fecha=fecha, nregistro=nregistro, metodo=metodo)
-        return format_response(result, _build_metadata({"fecha": fecha, "nregistro": nregistro}))
+        return await core_registro_cambios(fecha=fecha, nregistro=nregistro, metodo=metodo)
 
     @server.tool(description=problemas_suministro_description)
+    @_serialize_errors
     async def problemas_suministro(
         cn: list[str] | None = None,
         nregistro: list[str] | None = None,
         pagina: int = 1,
         tamanioPagina: int = 25,
     ) -> dict[str, Any]:
-        meta = _build_metadata(
-            {"cn": cn, "nregistro": nregistro, "pagina": pagina, "tamanioPagina": tamanioPagina},
-            API_PSUM_VERSION,
+        return await core_problemas_suministro(
+            cn=cn, nregistro=nregistro, pagina=pagina, tamanioPagina=tamanioPagina,
         )
-        meta["metadata"]["tipo_problema_suministros"] = cima.TIPOS_PROBLEMA
-
-        if not cn and not nregistro:
-            listado = await safe_cima_call(
-                cima.psuministro_global, pagina=pagina, tamanioPagina=tamanioPagina
-            )
-            data = listado.get("resultados", []) if isinstance(listado, dict) else listado
-            return format_response(data, meta)
-
-        # Resolver nregistro -> CNs
-        resolved_cn: list[str] = []
-        if nregistro:
-            coros = [safe_cima_call(cima.medicamento, nregistro=nr) for nr in nregistro]
-            responses = await bounded_gather(coros)
-            for resp in responses:
-                if not isinstance(resp, Exception):
-                    pres = resp.get("data", {}).get("presentaciones") or resp.get("presentaciones") or []
-                    for p in pres:
-                        if p.get("cn"):
-                            resolved_cn.append(p["cn"])
-
-        cn_list = list(dict.fromkeys((cn or []) + resolved_cn))
-        if not cn_list:
-            return format_response({"error": "No se encontraron CN para procesar"}, meta)
-
-        coros = [safe_cima_call(cima.psuministro_cn, c) for c in cn_list]
-        responses = await bounded_gather(coros)
-        data: dict[str, Any] = {}
-        for c, resp in zip(cn_list, responses):
-            if not isinstance(resp, Exception):
-                data[c] = resp
-        return format_response({"data": data}, meta)
 
     @server.tool(description=problemas_suministro_dcp_description)
+    @_serialize_errors
     async def problemas_suministro_dcp(cod_dcp: str) -> dict[str, Any]:
-        result = await safe_cima_call(cima.psuministro_dcp, cod_dcp)
-        return format_response(result, _build_metadata({"cod_dcp": cod_dcp}, API_PSUM_VERSION))
+        return await core_problemas_suministro_dcp(cod_dcp=cod_dcp)
 
     @server.tool(description=problemas_suministro_dcpf_description)
+    @_serialize_errors
     async def problemas_suministro_dcpf(cod_dcpf: str) -> dict[str, Any]:
-        result = await safe_cima_call(cima.psuministro_dcpf, cod_dcpf)
-        return format_response(result, _build_metadata({"cod_dcpf": cod_dcpf}, API_PSUM_VERSION))
+        return await core_problemas_suministro_dcpf(cod_dcpf=cod_dcpf)
 
     @server.tool(description=listar_notas_description)
+    @_serialize_errors
     async def listar_notas(nregistro: list[str]) -> dict[str, Any]:
-        if not nregistro:
-            return {"error": "Se requiere al menos un 'nregistro'."}
-        coros = [safe_cima_call(cima.notas, nregistro=nr) for nr in nregistro]
-        responses = await bounded_gather(coros)
-        data: dict[str, Any] = {}
-        errors: dict[str, str] = {}
-        for nr, resp in zip(nregistro, responses):
-            if isinstance(resp, Exception):
-                errors[nr] = str(resp)
-            elif resp:
-                data[nr] = resp
-        return format_response({"notas": data, "errores": errors}, _build_metadata({"nregistro": nregistro}))
+        return await core_listar_notas(nregistro=nregistro)
+
+    @server.tool(description=obtener_notas_description)
+    @_serialize_errors
+    async def obtener_notas(nregistros: list[str]) -> dict[str, Any]:
+        return await core_obtener_notas(nregistros=nregistros)
 
     @server.tool(description=listar_materiales_description)
+    @_serialize_errors
     async def listar_materiales(nregistro: list[str]) -> dict[str, Any]:
-        if not nregistro:
-            return {"error": "Se requiere al menos un 'nregistro'."}
-        coros = [safe_cima_call(cima.materiales, nregistro=nr) for nr in nregistro]
-        responses = await bounded_gather(coros)
-        data = [r for r in responses if not isinstance(r, Exception) and r]
-        return format_response(data, _build_metadata({"nregistro": nregistro}))
+        return await core_listar_materiales(nregistro=nregistro)
+
+    @server.tool(description=obtener_materiales_description)
+    @_serialize_errors
+    async def obtener_materiales(nregistro: str) -> dict[str, Any]:
+        return await core_obtener_materiales(nregistro=nregistro)
 
     # ------------------------------------------------------------------
     # Documentos segmentados (FT, prospecto)
     # ------------------------------------------------------------------
     @server.tool(description=doc_secciones_description)
+    @_serialize_errors
     async def doc_secciones(
         tipo_doc: int,
         nregistro: list[str] | None = None,
         cn: list[str] | None = None,
     ) -> dict[str, Any]:
-        if not (nregistro or cn):
-            return {"error": "Se requiere al menos un 'nregistro' o 'cn'."}
-        results: list[dict[str, Any]] = []
-        for code_list, is_cn in [(nregistro or [], False), (cn or [], True)]:
-            for code in code_list:
-                nr_norm, cn_norm = await normalize_nregistro_and_cn(
-                    nregistro=None if is_cn else code,
-                    cn=code if is_cn else None,
-                )
-                if not nr_norm:
-                    continue
-                bloques = await safe_cima_call(cima.doc_secciones, tipo_doc, nregistro=nr_norm)
-                if bloques:
-                    for b in bloques:
-                        if isinstance(b, dict):
-                            b["_codigo_origen"] = cn_norm or code
-                            b["_nregistro"] = nr_norm
-                    results.extend(bloques)
-        return format_response(
-            results, _build_metadata({"tipo_doc": tipo_doc, "cn": cn, "nregistro": nregistro})
-        )
+        return await core_doc_secciones(tipo_doc=tipo_doc, nregistro=nregistro, cn=cn)
 
     @server.tool(description=doc_contenido_description)
+    @_serialize_errors
     async def doc_contenido(
         tipo_doc: int,
         nregistro: str | None = None,
@@ -307,45 +289,45 @@ def build_server() -> FastMCP:
         seccion: str | None = None,
         format: str = "json",
     ) -> Any:
-        if not (nregistro or cn):
-            return {"error": "Se requiere 'nregistro' o 'cn'."}
-        nr_norm, cn_norm = await normalize_nregistro_and_cn(nregistro=nregistro, cn=cn)
-        if not nr_norm:
-            return {"error": "No se pudo resolver nregistro"}
-        result = await safe_cima_call(
-            cima.doc_contenido,
-            tipo_doc=tipo_doc,
-            nregistro=nr_norm,
-            seccion=seccion,
-            format=format,
+        result = await core_doc_contenido(
+            tipo_doc=tipo_doc, nregistro=nregistro, cn=cn, seccion=seccion, format=format,
         )
-        if format == "json":
-            return format_response(
-                result,
-                _build_metadata(
-                    {"tipo_doc": tipo_doc, "nregistro": nr_norm, "cn": cn_norm, "seccion": seccion}
-                ),
-            )
+        # html / txt → return raw content; json → return the dict.
+        if format != "json" and isinstance(result, dict) and "content" in result:
+            return result["content"]
         return result
 
     @server.tool(description=html_ft_description)
+    @_serialize_errors
     async def html_ficha_tecnica(nregistro: str, filename: str = "FichaTecnica.html") -> str:
-        data = await cima.get_html_bytes(tipo="ft", nregistro=nregistro, filename=filename)
-        return data.decode("utf-8")
+        return await core_html_ficha_tecnica(nregistro=nregistro, filename=filename)
+
+    @server.tool(description=html_ft_multiple_description)
+    @_serialize_errors
+    async def html_ficha_tecnica_multiple(
+        nregistro: list[str], filename: str = "FichaTecnica.html"
+    ) -> dict[str, Any]:
+        return await core_html_ficha_tecnica_multiple(nregistro=nregistro, filename=filename)
 
     @server.tool(description=html_p_description)
+    @_serialize_errors
     async def html_prospecto(nregistro: str, filename: str = "Prospecto.html") -> str:
-        data = await cima.get_html_bytes(tipo="p", nregistro=nregistro, filename=filename)
-        return data.decode("utf-8")
+        return await core_html_prospecto(nregistro=nregistro, filename=filename)
+
+    @server.tool(description=html_p_multiple_description)
+    @_serialize_errors
+    async def html_prospecto_multiple(
+        nregistro: list[str], filename: str = "Prospecto.html"
+    ) -> dict[str, Any]:
+        return await core_html_prospecto_multiple(nregistro=nregistro, filename=filename)
 
     return server
 
 
 def main() -> None:
-    """Entry point for `mcp-aemps stdio` and `python -m app.stdio_server`."""
+    """Entry point for ``mcp-aemps stdio`` and ``python -m app.stdio_server``."""
     configure_logging()
     server = build_server()
-    # FastMCP.run() defaults to stdio transport — exactly what we want.
     asyncio.run(server.run_stdio_async())
 
 

@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] — 2026-05-05
+
+### Added
+- **`POST /buscarEnFichaTecnica`** — el unico endpoint oficial CIMA que
+  faltaba en el transport HTTP ya esta expuesto.
+- **stdio expone 5 tools nuevas** que solo estaban en HTTP: `obtener_notas`
+  (path-based), `obtener_materiales`, `html_ficha_tecnica_multiple`,
+  `html_prospecto_multiple` y la propia `buscar_en_ficha_tecnica`.
+- **Test de paridad cross-transport** (`test_http_and_stdio_expose_the_same_tools`)
+  que falla el CI si HTTP y stdio divergen.
+
+### Changed
+- **Nuevo paquete `app/core/`** como single source of truth: cada
+  operacion MCP (medicamentos, presentaciones, VMP/VMPP, maestras,
+  registro de cambios, problemas de suministro, notas, materiales,
+  documentos) vive como `core_<op>` async function transport-agnostica.
+  Los routes FastAPI (`app/routes/*.py`) y las tools FastMCP
+  (`app/stdio_server.py`) son adaptadores finos sobre el core.
+- **Rutas HTTP ~70% mas cortas**: validacion declarativa via FastAPI
+  Query/Path/Body, logica de negocio delegada al core.
+- **Errores estructurados**: el core lanza `OperationError(status_code, error,
+  message, details)`. Un `@app.exception_handler` global lo serializa a
+  `JSONResponse` para HTTP; el stdio lo serializa a dict via decorador
+  `_serialize_errors` para que el LLM reciba un payload accionable.
+- **Paridad total**: ambos transports exponen las **21 tools CIMA
+  oficiales** y devuelven la misma forma JSON.
+
 ## [0.2.1] — 2026-05-05
 
 ### Changed
