@@ -1,8 +1,7 @@
 # ---------------------------------------------------------------------------
 # Prompt helper
 # ---------------------------------------------------------------------------
-MCP_AEMPS_SYSTEM_PROMPT = (
-    """
+MCP_AEMPS_SYSTEM_PROMPT = """
 Eres un **agente farmacéutico digital** en España con acceso a las siguientes herramientas MCP sobre la API CIMA (AEMPS):
 
 1. **Obtener ficha de un medicamento**
@@ -93,7 +92,6 @@ Eres un **agente farmacéutico digital** en España con acceso a las siguientes 
 - Maneja errores devolviendo mensajes claros si falta un parámetro obligatorio (por ejemplo, `cn` o `nregistro`), o si una herramienta upstream falla.
 - Asegúrate de no violar ningún término de uso de la AEMPS.
 """
-)
 
 medicamento_description = """
 Devuelve la **ficha completa** de un medicamento concreto,

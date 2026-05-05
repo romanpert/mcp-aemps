@@ -7,7 +7,6 @@
 #   /notas*, /materiales*
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -20,6 +19,7 @@ from app.config import settings
 from app.helpers import (
     API_PSUM_VERSION,
     _build_metadata,
+    bounded_gather,
     format_response,
     safe_cima_call,
 )
@@ -82,7 +82,9 @@ async def registro_cambios(
         else:
             item["fechaStr"] = None
 
-    parametros = {k: v for k, v in {"fecha": fecha, "nregistro": nregistro, "metodo": metodo}.items() if v is not None}
+    parametros = {
+        k: v for k, v in {"fecha": fecha, "nregistro": nregistro, "metodo": metodo}.items() if v is not None
+    }
     return format_response(resultados, _build_metadata(parametros))
 
 
@@ -111,14 +113,16 @@ async def problemas_suministro(
     # Global listing
     if not cn and not nregistro:
         listado = await safe_cima_call(cima.psuministro_global, pagina=pagina, tamanioPagina=tamanioPagina)
-        return format_response(listado.get("resultados", []) if isinstance(listado, dict) else listado, metadatos)
+        return format_response(
+            listado.get("resultados", []) if isinstance(listado, dict) else listado, metadatos
+        )
 
     # Resolver nregistro → CNs via CIMA medicamento
     resolved_cn: List[str] = []
     errors_nregistro: Dict[str, Any] = {}
     if nregistro:
         tasks = [safe_cima_call(cima.medicamento, nregistro=nr) for nr in nregistro]
-        responses = await asyncio.gather(*tasks, return_exceptions=True)
+        responses = await bounded_gather(tasks)
 
         for nr, resp in zip(nregistro, responses):
             if isinstance(resp, Exception):
@@ -137,11 +141,13 @@ async def problemas_suministro(
     cn_list = list(dict.fromkeys((cn or []) + resolved_cn))
 
     if not cn_list:
-        raise HTTPException(404, detail={"error": "No se encontraron CN para procesar", "errors_nregistro": errors_nregistro})
+        raise HTTPException(
+            404, detail={"error": "No se encontraron CN para procesar", "errors_nregistro": errors_nregistro}
+        )
 
     # Consultar v2/cn para cada CN (con fallback v1 integrado en psuministro_cn)
     tasks = [safe_cima_call(cima.psuministro_cn, codigo) for codigo in cn_list]
-    responses = await asyncio.gather(*tasks, return_exceptions=True)
+    responses = await bounded_gather(tasks)
 
     data: Dict[str, Any] = {}
     errors_cn: Dict[str, Any] = {}
@@ -152,11 +158,14 @@ async def problemas_suministro(
             data[codigo] = resp
 
     if not data:
-        raise HTTPException(404, detail={
-            "error": "No se encontraron problemas de suministro",
-            "not_found_cn": list(errors_cn.keys()),
-            "errors_cn": errors_cn,
-        })
+        raise HTTPException(
+            404,
+            detail={
+                "error": "No se encontraron problemas de suministro",
+                "not_found_cn": list(errors_cn.keys()),
+                "errors_cn": errors_cn,
+            },
+        )
 
     payload: Dict[str, Any] = {"data": data}
     if errors_nregistro:
@@ -213,7 +222,7 @@ async def problemas_suministro_dcpf(
 # ---------------------------------------------------------------------------
 async def _fetch_notas_batch(registros: List[str]) -> tuple[Dict[str, Any], Dict[str, str]]:
     tasks = [safe_cima_call(cima.notas, nregistro=nr) for nr in registros]
-    responses = await asyncio.gather(*tasks, return_exceptions=True)
+    responses = await bounded_gather(tasks)
 
     resultados: Dict[str, Any] = {}
     errores: Dict[str, str] = {}
@@ -247,7 +256,9 @@ async def listar_notas(
     if not resultados:
         raise HTTPException(404, {"error": "ninguna nota", "detalles": errores})
 
-    return format_response({"notas": resultados, "errores": errores}, _build_metadata({"nregistro": nregistro}))
+    return format_response(
+        {"notas": resultados, "errores": errores}, _build_metadata({"nregistro": nregistro})
+    )
 
 
 @router.get(
@@ -265,13 +276,18 @@ async def obtener_notas(
     resultados, errores = await _fetch_notas_batch(registros)
 
     if not resultados:
-        raise HTTPException(404, detail={
-            "error": "Ninguna nota encontrada",
-            "not_found_nregistro": registros,
-            "errores": errores,
-        })
+        raise HTTPException(
+            404,
+            detail={
+                "error": "Ninguna nota encontrada",
+                "not_found_nregistro": registros,
+                "errores": errores,
+            },
+        )
 
-    return format_response({"notas": resultados, "errores": errores}, _build_metadata({"nregistro": registros}))
+    return format_response(
+        {"notas": resultados, "errores": errores}, _build_metadata({"nregistro": registros})
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -291,12 +307,14 @@ async def listar_materiales(
         raise HTTPException(400, detail="Se requiere al menos un 'nregistro'.")
 
     tareas = [safe_cima_call(cima.materiales, nregistro=nr) for nr in nregistro]
-    respuestas = await asyncio.gather(*tareas, return_exceptions=True)
+    respuestas = await bounded_gather(tareas)
 
     data = [res for res in respuestas if not isinstance(res, Exception) and res]
 
     if not data:
-        raise HTTPException(404, detail={"error": "Ningun material asociado", "not_found_nregistro": nregistro})
+        raise HTTPException(
+            404, detail={"error": "Ningun material asociado", "not_found_nregistro": nregistro}
+        )
 
     return format_response(data, _build_metadata({"nregistro": nregistro}))
 
@@ -318,6 +336,8 @@ async def obtener_materiales(
         raise HTTPException(502, detail="Error al consultar material en CIMA.")
 
     if not resultado:
-        raise HTTPException(404, detail={"error": "Ningun material asociado", "not_found_nregistro": [nregistro]})
+        raise HTTPException(
+            404, detail={"error": "Ningun material asociado", "not_found_nregistro": [nregistro]}
+        )
 
     return format_response(resultado, _build_metadata({"nregistro": nregistro}))

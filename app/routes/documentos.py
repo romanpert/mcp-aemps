@@ -3,7 +3,6 @@
 #   /doc-secciones, /doc-contenido, /doc-html/ft*, /doc-html/p*
 from __future__ import annotations
 
-import asyncio
 import logging
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -17,12 +16,13 @@ import app.cima_client as cima
 from app.config import settings
 from app.helpers import (
     _build_metadata,
+    bounded_gather,
     build_dochtml_url,
     format_response,
     normalize_nregistro_and_cn,
     safe_cima_call,
 )
-from app.rate_limits import limit_heavy, limit_standard
+from app.rate_limits import limit_document, limit_heavy, limit_standard
 
 logger = logging.getLogger("mcp.aemps")
 LOG_STACKTRACES = bool(settings.log_stacktraces)
@@ -123,7 +123,9 @@ async def doc_contenido(
     nr_norm, cn_norm = await normalize_nregistro_and_cn(nregistro=nregistro, cn=cn)
 
     if not nr_norm:
-        raise HTTPException(404, detail="No se pudo resolver el numero de registro del medicamento solicitado")
+        raise HTTPException(
+            404, detail="No se pudo resolver el numero de registro del medicamento solicitado"
+        )
 
     ext_map = {Format.json: "html", Format.html: "html", Format.txt: "txt"}
     cima_url = build_dochtml_url(
@@ -132,7 +134,11 @@ async def doc_contenido(
 
     try:
         resultado = await safe_cima_call(
-            cima.doc_contenido, tipo_doc=tipo_doc, nregistro=nr_norm, seccion=seccion, format=format.value,
+            cima.doc_contenido,
+            tipo_doc=tipo_doc,
+            nregistro=nr_norm,
+            seccion=seccion,
+            format=format.value,
         )
     except Exception:
         logger.error("doc_contenido failed", exc_info=LOG_STACKTRACES)
@@ -155,20 +161,27 @@ async def doc_contenido(
 # 3. HTML ficha tecnica (batch + single)
 # ---------------------------------------------------------------------------
 async def _fetch_html_batch(
-    tipo: str, nregistro: List[str], filename: str, not_found_label: str,
+    tipo: str,
+    nregistro: List[str],
+    filename: str,
+    not_found_label: str,
 ) -> Dict[str, Any]:
     if not nregistro or not filename:
         raise HTTPException(400, "Se requiere al menos un 'nregistro' y un 'filename'.")
 
     tasks = [cima.get_html_bytes(tipo=tipo, nregistro=nr, filename=filename) for nr in nregistro]
-    responses = await asyncio.gather(*tasks, return_exceptions=True)
+    responses = await bounded_gather(tasks)
 
     data_map: Dict[str, str] = {}
     errors: Dict[str, str] = {}
 
     for nr, resp in zip(nregistro, responses):
         if isinstance(resp, HTTPStatusError):
-            errors[nr] = not_found_label if resp.response.status_code == 404 else f"Error HTTP {resp.response.status_code}"
+            errors[nr] = (
+                not_found_label
+                if resp.response.status_code == 404
+                else f"Error HTTP {resp.response.status_code}"
+            )
         elif isinstance(resp, Exception):
             errors[nr] = f"Error inesperado: {type(resp).__name__}"
         else:
@@ -189,7 +202,7 @@ async def _fetch_html_batch(
     operation_id="html_ficha_tecnica_multiple",
     summary="Fichas tecnicas HTML para varios registros",
     response_model=None,
-    dependencies=[limit_heavy],
+    dependencies=[limit_document],
 )
 async def html_ficha_tecnica_multiple(
     nregistro: List[str] = Query(..., description="N de registro (repetir)"),
@@ -203,7 +216,7 @@ async def html_ficha_tecnica_multiple(
     operation_id="html_prospecto_multiple",
     summary="Prospectos HTML para varios registros",
     response_model=None,
-    dependencies=[limit_heavy],
+    dependencies=[limit_document],
 )
 async def html_prospecto_multiple(
     nregistro: List[str] = Query(..., description="N de registro (repetir)"),
@@ -227,7 +240,7 @@ async def _fetch_html_single(tipo: str, nregistro: str, filename: str, label: st
     operation_id="html_ficha_tecnica",
     summary="HTML completo de ficha tecnica (unico registro)",
     response_model=None,
-    dependencies=[limit_standard],
+    dependencies=[limit_document],
 )
 async def html_ficha_tecnica(
     nregistro: str = FPath(..., description="Numero de registro"),
@@ -241,11 +254,10 @@ async def html_ficha_tecnica(
     operation_id="html_prospecto",
     summary="HTML completo de prospecto (unico registro)",
     response_model=None,
-    dependencies=[limit_standard],
+    dependencies=[limit_document],
 )
 async def html_prospecto(
     nregistro: str = FPath(..., description="Numero de registro"),
     filename: str = FPath(..., description="Ruta y nombre de archivo HTML"),
 ):
     return await _fetch_html_single("p", nregistro, filename, "Prospecto")
-

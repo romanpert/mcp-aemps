@@ -18,6 +18,7 @@ En `app/mcp_aemps.json` se diferencian:
   - `access_host`: host que usan los clientes para acceder (p.ej. "localhost").
   - `port`: puerto TCP.
 """
+
 from __future__ import annotations
 
 import json
@@ -125,6 +126,7 @@ def _save_config(uvicorn_host: str, access_host: str, port: int) -> None:
     except Exception:
         console.print("⚠️  No se pudo guardar la configuración en disco.", style="yellow")
 
+
 def _find_free_port(start_port: int, host: str = DEFAULT_UVICORN_HOST) -> int:
     """
     Intenta bindear al puerto `start_port` en `host`; si está ocupado,
@@ -141,12 +143,14 @@ def _find_free_port(start_port: int, host: str = DEFAULT_UVICORN_HOST) -> int:
             except OSError:
                 port += 1
 
+
 def _pid_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
         return True
     except OSError:
         return False
+
 
 @cli.callback(invoke_without_command=True)
 def main(ctx: typer.Context):
@@ -157,24 +161,12 @@ def main(ctx: typer.Context):
 
 @cli.command()
 def up(
-    uvicorn_host: str = typer.Option(
-        DEFAULT_UVICORN_HOST, help="Dirección donde bindeará Uvicorn"
-    ),
-    access_host: str = typer.Option(
-        DEFAULT_ACCESS_HOST, help="Host público para acceder a la API"
-    ),
-    port: int = typer.Option(
-        DEFAULT_PORT, help="Puerto TCP"
-    ),
-    workers: int = typer.Option(
-        1, help="Número de workers Uvicorn"
-    ),
-    log_level: str = typer.Option(
-        "info", help="Nivel de log Uvicorn"
-    ),
-    daemon: bool = typer.Option(
-        False, "--daemon/--no-daemon", help="Ejecutar en background"
-    ),
+    uvicorn_host: str = typer.Option(DEFAULT_UVICORN_HOST, help="Dirección donde bindeará Uvicorn"),
+    access_host: str = typer.Option(DEFAULT_ACCESS_HOST, help="Host público para acceder a la API"),
+    port: int = typer.Option(DEFAULT_PORT, help="Puerto TCP"),
+    workers: int = typer.Option(1, help="Número de workers Uvicorn"),
+    log_level: str = typer.Option("info", help="Nivel de log Uvicorn"),
+    daemon: bool = typer.Option(False, "--daemon/--no-daemon", help="Ejecutar en background"),
     access_log: bool = typer.Option(False, "--access-log/--no-access-log", help="Access log de Uvicorn"),
 ):
     """Arranca el servidor *sin* autorecarga, orientado a producción."""
@@ -184,17 +176,24 @@ def up(
     puerto_libre = _find_free_port(start_port=port, host=uvicorn_host)
     if puerto_libre != port:
         console.print(
-            f"⚠️  El puerto {port} está ocupado; usando puerto libre {puerto_libre}.",
-            style="yellow"
+            f"⚠️  El puerto {port} está ocupado; usando puerto libre {puerto_libre}.", style="yellow"
         )
         port = puerto_libre
 
     log_level = log_level.lower()
     cmd = [
-        sys.executable, "-m", "uvicorn", APP_IMPORT,
-        "--host", uvicorn_host, "--port", str(port),
-        "--workers", str(workers),
-        "--log-level", log_level,
+        sys.executable,
+        "-m",
+        "uvicorn",
+        APP_IMPORT,
+        "--host",
+        uvicorn_host,
+        "--port",
+        str(port),
+        "--workers",
+        str(workers),
+        "--log-level",
+        log_level,
     ]
     if not access_log:
         cmd.append("--no-access-log")
@@ -204,7 +203,10 @@ def up(
         try:
             existing = int(PID_FILE.read_text())
             if _pid_alive(existing):
-                console.print(f"❌  Ya hay un servidor en ejecución (PID {existing}). Usa `down` o `restart`.", style="red")
+                console.print(
+                    f"❌  Ya hay un servidor en ejecución (PID {existing}). Usa `down` o `restart`.",
+                    style="red",
+                )
                 raise typer.Exit(code=1)
         except Exception:
             PID_FILE.unlink(missing_ok=True)
@@ -240,12 +242,8 @@ def up(
 
 @cli.command()
 def dev(
-    uvicorn_host: str = typer.Option(
-        DEFAULT_UVICORN_HOST, help="Host (desarrollo)"
-    ),
-    access_host: str = typer.Option(
-        "localhost", help="Host público para acceder a la API"
-    ),
+    uvicorn_host: str = typer.Option(DEFAULT_UVICORN_HOST, help="Host (desarrollo)"),
+    access_host: str = typer.Option("localhost", help="Host público para acceder a la API"),
     port: int = typer.Option(DEFAULT_PORT, help="Puerto TCP"),
     access_log: bool = typer.Option(True, "--access-log/--no-access-log", help="Access log de Uvicorn"),
 ):
@@ -256,8 +254,7 @@ def dev(
     puerto_libre = _find_free_port(start_port=port, host=uvicorn_host)
     if puerto_libre != port:
         console.print(
-            f"⚠️  El puerto {port} está ocupado; usando puerto libre {puerto_libre}.",
-            style="yellow"
+            f"⚠️  El puerto {port} está ocupado; usando puerto libre {puerto_libre}.", style="yellow"
         )
         port = puerto_libre
 
@@ -358,6 +355,7 @@ def logs(
         subprocess.run(["tail", "-f", str(file)])
     except FileNotFoundError:
         import time
+
         with file.open("r") as f:
             f.seek(0, os.SEEK_END)
             while True:
@@ -367,6 +365,7 @@ def logs(
                     continue
                 sys.stdout.write(line)
                 sys.stdout.flush()
+
 
 @cli.command()
 def health(
@@ -484,6 +483,7 @@ def _install_claude_desktop(
 ):
     """Install in Claude Desktop only."""
     from app.installers import install_claude_desktop
+
     _print_install_result(install_claude_desktop(url=url, server_key=name))
 
 
@@ -495,6 +495,7 @@ def _install_claude_code(
 ):
     """Install in Claude Code only (uses `claude mcp add` if available)."""
     from app.installers import install_claude_code
+
     _print_install_result(install_claude_code(url=url, server_key=name, scope=scope))
 
 
@@ -505,6 +506,7 @@ def _install_codex(
 ):
     """Install in OpenAI Codex CLI only."""
     from app.installers import install_codex
+
     _print_install_result(install_codex(url=url, server_key=name))
 
 
@@ -530,6 +532,7 @@ def _uninstall_main(
 def _uninstall_claude_desktop(name: str = typer.Option("mcp-aemps", "--name")):
     """Remove from Claude Desktop only."""
     from app.installers import uninstall_claude_desktop
+
     _print_install_result(uninstall_claude_desktop(server_key=name))
 
 
@@ -537,6 +540,7 @@ def _uninstall_claude_desktop(name: str = typer.Option("mcp-aemps", "--name")):
 def _uninstall_claude_code(name: str = typer.Option("mcp-aemps", "--name")):
     """Remove from Claude Code only."""
     from app.installers import uninstall_claude_code
+
     _print_install_result(uninstall_claude_code(server_key=name))
 
 

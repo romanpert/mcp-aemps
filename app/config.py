@@ -5,8 +5,11 @@ Community Edition runs with zero required env vars. Redis is optional —
 if no REDIS_URL (or no redis_password+redis_host) is set, the server uses
 in-memory cache and rate limiting and continues to work normally.
 """
+
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Annotated, List, Optional
 from urllib.parse import quote, urlparse
@@ -15,6 +18,14 @@ from pydantic import AnyUrl, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 ROOT_DIR = Path(__file__).parent.parent
+
+
+def _resolve_version() -> str:
+    """Read installed package version; fall back gracefully when running from source."""
+    try:
+        return _pkg_version("mcp-aemps")
+    except PackageNotFoundError:
+        return "0.0.0+source"
 
 
 def _mkdir_private(path_str: str) -> str:
@@ -35,7 +46,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    mcp_aemps_version: str = Field("0.1.0", description="Server version")
+    mcp_aemps_version: str = Field(default_factory=_resolve_version, description="Server version")
 
     uvicorn_host: str = Field("0.0.0.0", description="Uvicorn bind host")
     access_host: str = Field("localhost", description="Public host clients use")

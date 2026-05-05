@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] — 2026-05-05
+
+### Added
+- **Rate-limit hardening** based on CIMA API research:
+  - New `LIMIT_DOCUMENT` tier (10/min) for HTML/PDF endpoints.
+  - New `CIMA_FANOUT_SEMAPHORE` — module-level `asyncio.Semaphore(8)` that
+    caps total concurrent CIMA calls server-wide. Single most impactful
+    upstream-load defence.
+  - New `BATCH_FANOUT_LIMIT = 4` — per-batch-request fan-out cap.
+  - `httpx.Limits(max_connections=20, max_keepalive_connections=10)` on the
+    CIMA client — bounds the connection pool.
+- New helper `bounded_gather` (replaces `asyncio.gather` in batch route handlers)
+  to enforce the per-batch concurrency cap.
+- Tests: rate-limit tier values, semaphore cap, bounded_gather concurrency.
+  Total: 19 tests.
+
+### Changed
+- Tier values (per minute, per client IP):
+  - `local`: 60 → **120** (no upstream cost)
+  - `standard`: 30 (unchanged)
+  - `heavy`: 12 → **6** (each request fans out N CIMA calls)
+  - `document` (new): **10** for HTML/PDF endpoints
+- HTML/PDF document endpoints (`/doc-html/ft`, `/doc-html/p`, single + batch)
+  now use the `document` tier instead of `heavy`/`standard`.
+- Batch endpoints (`/notas`, `/materiales`, `/problemas-suministro`,
+  `/presentacion`, `/doc-html/ft`, `/doc-html/p`) use `bounded_gather` instead
+  of unbounded `asyncio.gather`.
+- `settings.mcp_aemps_version` now reads from `importlib.metadata` instead of
+  a hardcoded "0.1.0" — `/health` and OpenAPI version stay in sync with the
+  installed package version automatically.
+
+### Fixed
+- `ruff format` baseline applied across the codebase. CI lint check passes
+  on both `ruff check` and `ruff format --check`.
+
 ## [0.1.2] — 2026-05-05
 
 ### Added
@@ -63,6 +98,7 @@ First public release.
   `Permissions-Policy`.
 - No PII processed: CIMA exposes medicine metadata only.
 
+[0.1.3]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.1.3
 [0.1.2]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.1.2
 [0.1.1]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.1.1
 [0.1.0]: https://github.com/romanpert/mcp-aemps/releases/tag/v0.1.0

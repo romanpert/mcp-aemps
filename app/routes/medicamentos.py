@@ -4,7 +4,6 @@
 #   /vmpp, /maestras
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -14,6 +13,7 @@ import app.cima_client as cima
 from app.config import settings
 from app.helpers import (
     _build_metadata,
+    bounded_gather,
     format_response,
     parse_cima_fechas,
     parse_cima_fechas_list,
@@ -26,6 +26,7 @@ logger = logging.getLogger("mcp.aemps")
 router = APIRouter(tags=["Medicamentos"])
 
 MAX_RESULTS = settings.max_results
+
 
 # ---------------------------------------------------------------------------
 # 1. Medicamento (ficha unica)
@@ -42,11 +43,14 @@ async def obtener_medicamento(
     nregistro: Optional[str] = Query(None, pattern=r"^\d+$", description="Numero de registro AEMPS."),
 ) -> Dict[str, Any]:
     if not (cn or nregistro):
-        raise HTTPException(400, detail={
-            "error": "Parametros insuficientes",
-            "message": "Debe indicar al menos 'cn' o 'nregistro'.",
-            "required_params": ["cn", "nregistro"],
-        })
+        raise HTTPException(
+            400,
+            detail={
+                "error": "Parametros insuficientes",
+                "message": "Debe indicar al menos 'cn' o 'nregistro'.",
+                "required_params": ["cn", "nregistro"],
+            },
+        )
 
     cn_clean = cn.strip() if cn else None
     nr_clean = nregistro.strip() if nregistro else None
@@ -58,10 +62,13 @@ async def obtener_medicamento(
     except HTTPException as exc:
         if exc.status_code == 404:
             raise
-        raise HTTPException(exc.status_code, detail={
-            "error": "Error al obtener medicamento",
-            "message": str(exc.detail),
-        })
+        raise HTTPException(
+            exc.status_code,
+            detail={
+                "error": "Error al obtener medicamento",
+                "message": str(exc.detail),
+            },
+        )
 
     parse_cima_fechas(resultado)
 
@@ -80,7 +87,9 @@ async def obtener_medicamento(
     dependencies=[limit_standard],
 )
 async def buscar_medicamentos(
-    nombre: Optional[str] = Query(None, description="Nombre del medicamento (coincidencia parcial o exacta)."),
+    nombre: Optional[str] = Query(
+        None, description="Nombre del medicamento (coincidencia parcial o exacta)."
+    ),
     laboratorio: Optional[str] = Query(None, description="Nombre del laboratorio fabricante."),
     practiv1: Optional[str] = Query(None, description="Nombre del principio activo principal."),
     practiv2: Optional[str] = Query(None, description="Nombre de un segundo principio activo."),
@@ -98,35 +107,58 @@ async def buscar_medicamentos(
     comerc: Optional[int] = Query(None, ge=0, le=1, description="1 = Comercializados, 0 = No."),
     autorizados: Optional[int] = Query(None, ge=0, le=1, description="1 = Solo autorizados, 0 = No."),
     receta: Optional[int] = Query(None, ge=0, le=1, description="1 = Con receta, 0 = Sin receta."),
-    estupefaciente: Optional[int] = Query(None, ge=0, le=1, description="1 = Incluye estupefacientes, 0 = Excluye."),
+    estupefaciente: Optional[int] = Query(
+        None, ge=0, le=1, description="1 = Incluye estupefacientes, 0 = Excluye."
+    ),
     psicotropo: Optional[int] = Query(None, ge=0, le=1, description="1 = Incluye psicotropos, 0 = Excluye."),
-    estuopsico: Optional[int] = Query(None, ge=0, le=1, description="1 = Incluye estupefacientes o psicotropos, 0 = Excluye."),
+    estuopsico: Optional[int] = Query(
+        None, ge=0, le=1, description="1 = Incluye estupefacientes o psicotropos, 0 = Excluye."
+    ),
     pagina: Optional[int] = Query(1, ge=1, description="Numero de pagina de resultados (minimo 1)."),
 ) -> Dict[str, Any]:
     params: Dict[str, Any] = {
-        "nombre": nombre, "laboratorio": laboratorio,
-        "practiv1": practiv1, "practiv2": practiv2,
-        "idpractiv1": idpractiv1, "idpractiv2": idpractiv2,
-        "cn": cn, "atc": atc, "nregistro": nregistro,
-        "npactiv": npactiv, "triangulo": triangulo,
-        "huerfano": huerfano, "biosimilar": biosimilar,
-        "sust": sust, "vmp": vmp, "comerc": comerc,
-        "autorizados": autorizados, "receta": receta,
-        "estupefaciente": estupefaciente, "psicotropo": psicotropo,
-        "estuopsico": estuopsico, "pagina": pagina,
+        "nombre": nombre,
+        "laboratorio": laboratorio,
+        "practiv1": practiv1,
+        "practiv2": practiv2,
+        "idpractiv1": idpractiv1,
+        "idpractiv2": idpractiv2,
+        "cn": cn,
+        "atc": atc,
+        "nregistro": nregistro,
+        "npactiv": npactiv,
+        "triangulo": triangulo,
+        "huerfano": huerfano,
+        "biosimilar": biosimilar,
+        "sust": sust,
+        "vmp": vmp,
+        "comerc": comerc,
+        "autorizados": autorizados,
+        "receta": receta,
+        "estupefaciente": estupefaciente,
+        "psicotropo": psicotropo,
+        "estuopsico": estuopsico,
+        "pagina": pagina,
     }
     params = {k: v for k, v in params.items() if v is not None or k == "pagina"}
 
-    logger.info("Buscando medicamentos: pagina=%s, n_filters=%s", pagina, sum(1 for v in params.values() if v is not None))
+    logger.info(
+        "Buscando medicamentos: pagina=%s, n_filters=%s",
+        pagina,
+        sum(1 for v in params.values() if v is not None),
+    )
 
     try:
         resultados = await safe_cima_call(cima.medicamentos, **params)
     except HTTPException as exc:
         if exc.status_code in (500, 502):
-            raise HTTPException(exc.status_code, detail={
-                "error": "Error de respuesta de la API CIMA",
-                "message": "La API CIMA devolvio un error al buscar medicamentos",
-            })
+            raise HTTPException(
+                exc.status_code,
+                detail={
+                    "error": "Error de respuesta de la API CIMA",
+                    "message": "La API CIMA devolvio un error al buscar medicamentos",
+                },
+            )
         raise
 
     if isinstance(resultados, dict) and "resultados" in resultados:
@@ -153,19 +185,30 @@ async def listar_presentaciones(
     vmpp: Optional[str] = Query(None, description="ID del codigo VMPP."),
     idpractiv1: Optional[str] = Query(None, description="ID del principio activo."),
     comerc: Optional[int] = Query(None, ge=0, le=1, description="1 = Comercializados, 0 = No."),
-    estupefaciente: Optional[int] = Query(None, ge=0, le=1, description="1 = Incluye estupefacientes, 0 = Excluye."),
+    estupefaciente: Optional[int] = Query(
+        None, ge=0, le=1, description="1 = Incluye estupefacientes, 0 = Excluye."
+    ),
     psicotropo: Optional[int] = Query(None, ge=0, le=1, description="1 = Incluye psicotropos, 0 = Excluye."),
-    estuopsico: Optional[int] = Query(None, ge=0, le=1, description="1 = Incluye estupefacientes o psicotropos, 0 = Excluye."),
+    estuopsico: Optional[int] = Query(
+        None, ge=0, le=1, description="1 = Incluye estupefacientes o psicotropos, 0 = Excluye."
+    ),
 ) -> Dict[str, Any]:
     # BUG FIX: was using **locals() which passes all local vars to CIMA client.
     # Now uses explicit kwargs.
     cima_params = {
-        k: v for k, v in {
-            "cn": cn, "nregistro": nregistro, "vmp": vmp, "vmpp": vmpp,
-            "idpractiv1": idpractiv1, "comerc": comerc,
-            "estupefaciente": estupefaciente, "psicotropo": psicotropo,
+        k: v
+        for k, v in {
+            "cn": cn,
+            "nregistro": nregistro,
+            "vmp": vmp,
+            "vmpp": vmpp,
+            "idpractiv1": idpractiv1,
+            "comerc": comerc,
+            "estupefaciente": estupefaciente,
+            "psicotropo": psicotropo,
             "estuopsico": estuopsico,
-        }.items() if v is not None
+        }.items()
+        if v is not None
     }
 
     resultados = await safe_cima_call(cima.presentaciones, **cima_params)
@@ -201,7 +244,7 @@ async def obtener_presentacion(
 
     # Multiple CNs — concurrent
     tasks = [safe_cima_call(cima.presentacion, code) for code in cn]
-    respuestas = await asyncio.gather(*tasks, return_exceptions=True)
+    respuestas = await bounded_gather(tasks)
 
     result_dict: Dict[str, Any] = {}
     errors: Dict[str, Any] = {}
@@ -214,11 +257,14 @@ async def obtener_presentacion(
         result_dict[code] = format_response(resp, _build_metadata({"cn": code}))
 
     if not result_dict:
-        raise HTTPException(404, detail={
-            "error": "Ninguna presentacion encontrada",
-            "not_found_cn": list(errors.keys()),
-            "errors": errors,
-        })
+        raise HTTPException(
+            404,
+            detail={
+                "error": "Ninguna presentacion encontrada",
+                "not_found_cn": list(errors.keys()),
+                "errors": errors,
+            },
+        )
 
     response: Dict[str, Any] = {**result_dict}
     if errors:
@@ -251,11 +297,18 @@ async def buscar_vmpp(
 
     # BUG FIX: was using **locals()
     cima_params = {
-        k: v for k, v in {
-            "practiv1": practiv1, "idpractiv1": idpractiv1,
-            "dosis": dosis, "forma": forma, "atc": atc,
-            "nombre": nombre, "modoArbol": modoArbol, "pagina": pagina,
-        }.items() if v is not None
+        k: v
+        for k, v in {
+            "practiv1": practiv1,
+            "idpractiv1": idpractiv1,
+            "dosis": dosis,
+            "forma": forma,
+            "atc": atc,
+            "nombre": nombre,
+            "modoArbol": modoArbol,
+            "pagina": pagina,
+        }.items()
+        if v is not None
     }
 
     resultados = await safe_cima_call(cima.vmpp, **cima_params)
@@ -285,11 +338,19 @@ async def consultar_maestras(
 ) -> Dict[str, Any]:
     # BUG FIX: was using **locals()
     cima_params = {
-        k: v for k, v in {
-            "maestra": maestra, "nombre": nombre, "id": id, "codigo": codigo,
-            "estupefaciente": estupefaciente, "psicotropo": psicotropo,
-            "estuopsico": estuopsico, "enuso": enuso, "pagina": pagina,
-        }.items() if v is not None
+        k: v
+        for k, v in {
+            "maestra": maestra,
+            "nombre": nombre,
+            "id": id,
+            "codigo": codigo,
+            "estupefaciente": estupefaciente,
+            "psicotropo": psicotropo,
+            "estuopsico": estuopsico,
+            "enuso": enuso,
+            "pagina": pagina,
+        }.items()
+        if v is not None
     }
 
     resultados = await safe_cima_call(cima.maestras, **cima_params)

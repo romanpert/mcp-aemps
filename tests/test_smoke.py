@@ -1,4 +1,5 @@
 """End-to-end smoke tests — app boots, /health works, OpenAPI exposes endpoints."""
+
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
