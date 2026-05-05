@@ -1,0 +1,55 @@
+name: npm
+
+# Publishes the npm wrapper at npm/ to the npmjs.com registry.
+# Triggered on minor releases (vX.Y.0) — same cadence as the Docker image.
+# Uses npm's Trusted Publisher (OIDC) — no NPM_TOKEN secret needed.
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.0"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (must already exist as a git tag)."
+        required: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  publish:
+    name: Publish to npmjs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org/"
+
+      - name: Sync npm/package.json version with the git tag
+        working-directory: npm
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          echo "Setting npm version to $VERSION"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+
+      - name: Validate package contents
+        working-directory: npm
+        run: |
+          npm pack --dry-run
+          node bin/mcp-aemps.js --help || true   # smoke: file is executable
+
+      - name: Publish (Trusted Publisher / OIDC)
+        working-directory: npm
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

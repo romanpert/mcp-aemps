@@ -1,15 +1,25 @@
 name: Docker
 
 on:
+  # Build & push the Docker image only on minor releases (vX.Y.0).
+  # Patch tags (vX.Y.1, vX.Y.2…) ride the existing :X.Y and :latest tags
+  # produced by the previous minor build — keeps GHCR storage small and
+  # avoids spamming users with image bumps for tiny patches.
   push:
     tags:
-      - "v*.*.*"
+      - "v[0-9]+.[0-9]+.0"
     branches:
       - master
   pull_request:
     branches:
       - master
       - dev
+  # Manual override for emergency patch images.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to (re)build, e.g. v0.1.7 — must already exist as a git tag."
+        required: true
 
 env:
   REGISTRY: ghcr.io
@@ -26,6 +36,10 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          # When triggered by workflow_dispatch with an explicit tag, check
+          # that tag out so the image matches the requested release.
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3

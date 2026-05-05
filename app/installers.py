@@ -24,6 +24,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from app.runtime_state import resolve_default_url
 
@@ -123,34 +124,40 @@ def install_claude_desktop(
     url: str | None = None,
     server_key: str = SERVER_KEY,
     config_path: Path | None = None,
+    transport: str = "stdio",
 ) -> InstallResult:
     """Add or update the mcp-aemps entry in claude_desktop_config.json.
 
-    Claude Desktop's config file currently only validates **stdio** server
-    entries (remote/HTTP MCP servers go through the "Connectors" UI, not
-    this file). To expose an HTTP MCP server we bridge stdio↔HTTP with the
-    official `mcp-remote` npm package, executed via `npx`.
+    Two transport modes:
+
+    - **stdio** (default, Anthropic-canonical): Claude Desktop launches
+      `uvx mcp-aemps stdio` on demand. No long-running HTTP server, no
+      port management, no extra bridge. This is the pattern Anthropic
+      ships its reference servers with.
+    - **http**: bridges stdio↔HTTP via `npx mcp-remote <url>`. Use this
+      when you already run the server yourself (e.g. shared in your
+      network) and want the client to connect remotely.
     """
-    url = url or _default_url()
     path = config_path or claude_desktop_config_path()
     config = _read_json(path)
     config.setdefault("mcpServers", {})
 
-    desired = {"command": "npx", "args": ["-y", "mcp-remote", url]}
-    existing = config["mcpServers"].get(server_key)
+    if transport == "stdio":
+        desired: dict[str, Any] = {"command": "uvx", "args": ["mcp-aemps@latest", "stdio"]}
+        message_suffix = "(uvx auto-launch); restart Claude Desktop"
+    else:
+        url = url or _default_url()
+        desired = {"command": "npx", "args": ["-y", "mcp-remote", url]}
+        message_suffix = f"-> {url} (mcp-remote bridge); restart Claude Desktop"
 
+    existing = config["mcpServers"].get(server_key)
     if existing == desired:
         return InstallResult("Claude Desktop", path, "unchanged", f"{server_key} already configured")
 
     action = "updated" if existing else "added"
     config["mcpServers"][server_key] = desired
     _atomic_write_json(path, config)
-    return InstallResult(
-        "Claude Desktop",
-        path,
-        action,
-        f"{server_key} -> {url} (mcp-remote bridge); restart Claude Desktop",
-    )
+    return InstallResult("Claude Desktop", path, action, f"{server_key} {message_suffix}")
 
 
 def uninstall_claude_desktop(

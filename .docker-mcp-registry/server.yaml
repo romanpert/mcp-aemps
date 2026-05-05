@@ -25,13 +25,9 @@ config:
   description: |
     No required configuration. The server queries the public AEMPS CIMA API
     (https://cima.aemps.es/cima/rest) — no API key, no authentication needed.
+    The container listens on port 8765. Optional advanced env vars
+    (REDIS_URL, ALLOWED_ORIGINS) are documented in the project README.
   env:
-    - name: PORT
-      example: "8765"
-      value: "8765"
     - name: LOG_LEVEL
       example: INFO
       value: INFO
-    - name: ALLOWED_ORIGINS
-      example: http://localhost:3000
-      value: http://localhost:3000

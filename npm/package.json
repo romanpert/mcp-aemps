@@ -1,0 +1,46 @@
+{
+  "name": "mcp-aemps",
+  "version": "0.2.0",
+  "description": "MCP server for the Spanish AEMPS CIMA pharmaceutical registry — npm wrapper that delegates to `uvx mcp-aemps`.",
+  "keywords": [
+    "mcp",
+    "aemps",
+    "cima",
+    "pharmaceutical",
+    "healthcare",
+    "regulatory",
+    "claude",
+    "anthropic",
+    "spain"
+  ],
+  "license": "Apache-2.0",
+  "author": {
+    "name": "Román Pérez Dumpert",
+    "email": "roman.p98@gmail.com"
+  },
+  "homepage": "https://github.com/romanpert/mcp-aemps",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/romanpert/mcp-aemps.git",
+    "directory": "npm"
+  },
+  "bugs": {
+    "url": "https://github.com/romanpert/mcp-aemps/issues"
+  },
+  "type": "module",
+  "main": "bin/mcp-aemps.js",
+  "bin": {
+    "mcp-aemps": "bin/mcp-aemps.js"
+  },
+  "files": [
+    "bin/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

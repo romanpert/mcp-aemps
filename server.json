@@ -8,13 +8,13 @@
     "url": "https://github.com/romanpert/mcp-aemps",
     "source": "github"
   },
-  "version": "0.1.6",
+  "version": "0.2.0",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "mcp-aemps",
-      "version": "0.1.6",
+      "version": "0.2.0",
       "runtimeHint": "uvx",
       "transport": {
         "type": "streamable-http",
@@ -29,13 +29,8 @@
       "environmentVariables": [
         {
           "name": "PORT",
-          "description": "TCP port for the HTTP server",
+          "description": "TCP port for the HTTP server (used in transport URL template)",
           "default": "8765"
-        },
-        {
-          "name": "ALLOWED_ORIGINS",
-          "description": "Comma-separated CORS origins",
-          "default": "http://localhost:3000"
         },
         {
           "name": "LOG_LEVEL",

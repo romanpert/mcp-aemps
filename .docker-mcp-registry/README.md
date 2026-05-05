@@ -88,3 +88,29 @@ Docker revisa típicamente en 1-3 días. Pueden pedir cambios menores
   registry, sólo es el "staging area" del que copias a tu fork
 - Si actualizas el Dockerfile, server.yaml debería actualizar el SHA del
   commit en `source.commit` y abrirse un nuevo PR al registry
+
+## Automatización (futuras releases)
+
+El workflow `.github/workflows/docker-mcp-registry.yml` automatiza este
+proceso para versiones nuevas: cuando empujes un tag `vX.Y.Z`, abre/actualiza
+automáticamente un PR `bump-mcp-aemps-X.Y.Z` contra `docker/mcp-registry`
+desde tu fork `romanpert/mcp-registry`.
+
+Para activarlo, una sola vez:
+
+1. Genera un PAT en https://github.com/settings/tokens/new?scopes=public_repo&description=mcp-aemps-registry-sync
+   (scope **`public_repo`** es suficiente, NO uses `repo` que da más permisos).
+2. Copia el token.
+3. Ve a `Settings → Secrets and variables → Actions → New repository secret`
+   en https://github.com/romanpert/mcp-aemps/settings/secrets/actions
+4. Name: `MCP_REGISTRY_PAT`. Value: pega el token. Guarda.
+
+A partir del próximo `git push origin vX.Y.Z`, el workflow:
+- Sincroniza tu fork `romanpert/mcp-registry` con upstream `main`
+- Crea rama `bump-mcp-aemps-X.Y.Z` con `server.yaml` actualizado
+  (commit SHA inyectado del release)
+- Empuja la rama a tu fork
+- Abre/actualiza PR contra `docker/mcp-registry` con título "Bump mcp-aemps to X.Y.Z"
+
+El primer PR (initial submission) se hace manualmente con los pasos arriba.
+Los siguientes son completamente automáticos.
