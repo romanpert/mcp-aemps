@@ -71,8 +71,6 @@ class Settings(BaseSettings):
         description="CORS allowed origins",
     )
 
-    rate_limit: int = Field(100, description="Global rate-limit fallback (req/period)")
-    rate_period: int = Field(60, description="Rate-limit period in seconds")
     max_results: int = Field(30, description="Maximum results per page")
 
     @field_validator("allowed_origins", mode="before")
@@ -128,14 +126,12 @@ class Settings(BaseSettings):
             raise ValueError(f"log_level must be one of {sorted(allowed)}")
         return vv
 
-    @field_validator("rate_limit", "rate_period", "max_results")
-    def positive_and_reasonable(cls, v, info):
+    @field_validator("max_results")
+    def max_results_reasonable(cls, v):
         if not isinstance(v, int) or v <= 0:
-            raise ValueError(f"{info.field_name} must be a positive integer")
-        caps = {"rate_limit": 10_000, "rate_period": 86_400, "max_results": 1_000}
-        cap = caps.get(info.field_name)
-        if cap and v > cap:
-            raise ValueError(f"{info.field_name} must not exceed {cap}")
+            raise ValueError("max_results must be a positive integer")
+        if v > 1000:
+            raise ValueError("max_results must not exceed 1000")
         return v
 
     @field_validator("log_retention_days")

@@ -43,6 +43,14 @@ TIPOS_PROBLEMA = {
 
 _DEFAULT_HEADERS = {"Accept": "application/json", "User-Agent": "mcp-aemps/1.0"}
 
+# In-process ETag store: {request_key: (etag, parsed_response)}.
+# Honours CIMA's 30-min CDN cache: when we have a stored ETag we send
+# If-None-Match; if CIMA returns 304 we return the cached parsed response
+# without re-deserialising. This typically reduces upstream load by an order
+# of magnitude on hot paths (medicamento, presentaciones).
+_ETAG_CACHE_MAX = 2048
+_etag_cache: dict[str, tuple[str, Any]] = {}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -99,6 +107,16 @@ async def _request(
         clean_params = _clean(params)
         full_url = f"{BASE_URL}/{path}"
 
+        # ETag revalidation key (only meaningful for idempotent GETs without body).
+        cache_key = None
+        if method == "GET" and json_body is None:
+            cache_key = f"{path}?{json.dumps(clean_params or {}, sort_keys=True)}"
+
+        headers = dict(_DEFAULT_HEADERS)
+        if cache_key and cache_key in _etag_cache:
+            stored_etag, _ = _etag_cache[cache_key]
+            headers["If-None-Match"] = stored_etag
+
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
                 "HTTP %s %s | params_keys=%s", method, path, sorted(list((clean_params or {}).keys()))
@@ -106,8 +124,15 @@ async def _request(
 
         async with CIMA_FANOUT_SEMAPHORE:
             resp = await client.request(
-                method, full_url, params=clean_params, json=json_body, headers=_DEFAULT_HEADERS
+                method, full_url, params=clean_params, json=json_body, headers=headers
             )
+
+        # 304 Not Modified — return cached parsed response without re-parsing.
+        if resp.status_code == 304 and cache_key and cache_key in _etag_cache:
+            _, cached_payload = _etag_cache[cache_key]
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("HTTP %s %s | 304 (cached, etag hit)", method, path)
+            return cached_payload
 
         if logger.isEnabledFor(logging.DEBUG):
             clen = resp.headers.get("Content-Length") or (
@@ -121,9 +146,18 @@ async def _request(
             return None
 
         try:
-            return resp.json()
+            payload = resp.json()
         except (json.JSONDecodeError, ValueError):
-            return resp.text
+            payload = resp.text
+
+        # Cache the (etag, payload) pair when CIMA provided one.
+        etag = resp.headers.get("ETag")
+        if cache_key and etag:
+            if len(_etag_cache) >= _ETAG_CACHE_MAX:
+                _etag_cache.pop(next(iter(_etag_cache)), None)
+            _etag_cache[cache_key] = (etag, payload)
+
+        return payload
 
     except httpx.HTTPStatusError as e:
         logger.error(

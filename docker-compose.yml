@@ -1,0 +1,43 @@
+name: mcp-aemps
+
+services:
+  mcp-aemps:
+    image: ghcr.io/romanpert/mcp-aemps:latest
+    # build: . # uncomment to build from source instead
+    container_name: mcp-aemps
+    restart: unless-stopped
+    ports:
+      - "${MCP_AEMPS_PORT:-8765}:8765"
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
+      # REDIS_URL: redis://redis:6379/0   # uncomment to enable Redis backend
+    volumes:
+      - mcp_logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8765/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    # Uncomment to enable Redis-backed cache + distributed rate limiting
+    # depends_on:
+    #   redis:
+    #     condition: service_healthy
+
+  # Optional Redis backend — uncomment together with REDIS_URL above
+  # redis:
+  #   image: redis:7-alpine
+  #   restart: unless-stopped
+  #   command: ["redis-server", "--save", "60", "1", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+  #   volumes:
+  #     - mcp_redis:/data
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 10s
+  #     timeout: 3s
+  #     retries: 5
+
+volumes:
+  mcp_logs:
+  # mcp_redis:

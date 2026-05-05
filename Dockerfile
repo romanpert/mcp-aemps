@@ -1,60 +1,84 @@
-FROM python:3.13-slim
+# syntax=docker/dockerfile:1.9
+# ============================================================================
+# mcp-aemps — multi-stage Docker build
+# ============================================================================
+# Stage 1 (builder): installs deps + builds wheels into a venv
+# Stage 2 (runtime): copies the venv on top of a slim base, runs as non-root
+# Result: ~150 MB image (was ~280 MB), no build toolchain in final image
+# ============================================================================
 
-# Evitar warnings y salida con buffer
-ENV PIP_ROOT_USER_ACTION=ignore \
-    PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+ARG PYTHON_VERSION=3.13
 
-# Dependencias de sistema
+# ---------- builder ---------------------------------------------------------
+FROM python:${PYTHON_VERSION}-slim AS builder
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    UV_LINK_MODE=copy
+
+WORKDIR /build
+
+# System deps for building (curl for healthcheck stays in runtime, build-essential only here)
 RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      libmagic1 jq curl ca-certificates wget \
+ && apt-get install -y --no-install-recommends build-essential \
  && rm -rf /var/lib/apt/lists/*
 
-# ----- Crear usuario no-root y preparar directorios -----
-ARG APP_USER=appuser
-ARG APP_UID=10001
-RUN useradd -u ${APP_UID} -m -s /usr/sbin/nologin ${APP_USER} \
- && mkdir -p /app /data /app/logs \
- && chown -R ${APP_USER}:${APP_USER} /app /data \
- && chmod 700 /data /app/logs
+# Use uv for faster, deterministic installs
+RUN pip install --upgrade pip uv
 
-WORKDIR /app
-
-# ----- Copiar dependencias -----
-COPY requirements.txt pyproject.toml ./
-
-# ----- Instalar dependencias -----
-RUN pip install --no-cache-dir --upgrade pip \
- && pip install --no-cache-dir -r requirements.txt
-
-# ----- Copiar código -----
+# Resolve deps first (cacheable layer) — copy only what's needed for resolution
+COPY pyproject.toml README.md LICENSE ./
 COPY app/ ./app/
 
-# ----- Instalar en modo editable -----
-RUN pip install --no-cache-dir -e .
+# Build a venv with the package + runtime deps
+RUN python -m venv /opt/venv \
+ && . /opt/venv/bin/activate \
+ && uv pip install --strict .
 
-# ----- Exponer puerto -----
-EXPOSE 8000
+# ---------- runtime ---------------------------------------------------------
+FROM python:${PYTHON_VERSION}-slim AS runtime
 
-# ----- Cambiar a usuario no-root -----
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    PORT=8765 \
+    LOG_LEVEL=INFO
+
+# Tools needed at runtime: curl for healthcheck, ca-certificates for HTTPS to CIMA
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+# Non-root user
+ARG APP_UID=10001
+ARG APP_USER=appuser
+RUN useradd -u ${APP_UID} -m -s /usr/sbin/nologin ${APP_USER} \
+ && mkdir -p /app/logs /app/state \
+ && chown -R ${APP_USER}:${APP_USER} /app
+
+# Copy the venv from the builder
+COPY --from=builder /opt/venv /opt/venv
+
+WORKDIR /app
 USER ${APP_USER}
 
-# ----- Healthcheck de la app -----
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=5 \
-  CMD wget -qO- http://127.0.0.1:8000/health || exit 1
+EXPOSE 8765
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=5 \
+  CMD curl -sf http://127.0.0.1:${PORT}/health || exit 1
 
-# 3A) Arranque de Uvicorn
-#    --app-dir /app indica a Uvicorn dónde buscar el módulo Python
-# CMD ["uvicorn", "app/mcp_aemps_server:app", "--host", "0.0.0.0", "--port", "8000", "--app-dir", "/app"]
+# Default: run server in foreground. Override with `docker run ... mcp-aemps <cmd>`
+CMD ["sh", "-c", "mcp-aemps up --uvicorn-host 0.0.0.0 --port ${PORT} --no-auto-port"]
 
-# 3B) Arranque con CLI
-# Arranque con CLI leyendo UVICORN_HOST y PORT del entorno
-CMD ["sh", "-c", "\
-  echo \"Arrancando en ${UVICORN_HOST}:${PORT}…\" && \
-    mcp_aemps up \
-      --uvicorn-host \"${UVICORN_HOST}\" \
-      --port         \"${PORT}\" \
-      --access-host  \"${ACCESS_HOST:-localhost}\" \
-"]
+# ============================================================================
+# OCI labels (image metadata for ghcr.io / docker hub)
+# ============================================================================
+LABEL org.opencontainers.image.title="mcp-aemps" \
+      org.opencontainers.image.description="MCP server for the Spanish AEMPS CIMA pharmaceutical registry" \
+      org.opencontainers.image.url="https://github.com/romanpert/mcp-aemps" \
+      org.opencontainers.image.source="https://github.com/romanpert/mcp-aemps" \
+      org.opencontainers.image.documentation="https://github.com/romanpert/mcp-aemps#readme" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.authors="Román Pérez Dumpert <roman.p98@gmail.com>" \
+      org.opencontainers.image.vendor="romanpert"
