@@ -121,3 +121,21 @@ limit_local = Depends(_local)
 limit_standard = Depends(_standard)
 limit_document = Depends(_document)
 limit_heavy = Depends(_heavy)
+
+
+# Stable public API. Downstream consumers (e.g. MOXI premium routes) can rely
+# on these names across 0.2.x — adding new tiers is non-breaking; renaming or
+# removing one requires a MINOR bump.
+__all__ = [
+    "limit_local",
+    "limit_standard",
+    "limit_document",
+    "limit_heavy",
+    "LIMIT_LOCAL",
+    "LIMIT_STANDARD",
+    "LIMIT_DOCUMENT",
+    "LIMIT_HEAVY",
+    "CIMA_FANOUT_SEMAPHORE",
+    "CIMA_FANOUT_LIMIT",
+    "BATCH_FANOUT_LIMIT",
+]

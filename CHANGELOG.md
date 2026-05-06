@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] — 2026-05-06
+
+### Added
+- **Pre/post tool-call hooks** on both transports. Pass `pre_tool_hooks` /
+  `post_tool_hooks` to `create_app(...)` and `build_server(...)`; the same
+  hook fires for the same tool name across HTTP and native stdio. Pre-hooks
+  raising `OperationError` abort the call with the transport-native error
+  shape; post-hooks are best-effort (exceptions logged, never raised). New
+  module `app/tool_hooks.py` documents the contract — `HookSet`,
+  `PreHookFn`, `PostHookFn`, `wrap_stdio_tool`.
+- **`health_extra` extension point** on `/health/ready`. Pass an async
+  callable to `create_app(health_extra=...)`; its dict is merged into the
+  response body. Any returned key suffixed `_ready` (or the bare key
+  `ready`) whose value is `False` flips the response to 503 with
+  `status="degraded"`. Probes never crash: a buggy `health_extra` is caught
+  and surfaced as `health_extra_error: true`.
+- **`metrics_replace` flag** on `create_app(...)`. When true, the
+  in-process metrics middleware is skipped so a downstream consumer can
+  install Prometheus / OTel instrumentation without double-counting
+  requests.
+
+### Changed
+- `app.rate_limits` now declares an explicit `__all__` so the per-tier
+  Depends helpers (`limit_local`, `limit_standard`, `limit_document`,
+  `limit_heavy`) are part of the documented public API. Renaming or
+  removing a tier from now on requires a MINOR bump.
+- `app/stdio_server.py` `_serialize_errors` replaced by
+  `app.tool_hooks.wrap_stdio_tool`. Behaviour for callers without hooks is
+  identical: `OperationError` → dict; everything else propagates.
+
+### Tests
+- 63/63 passing (was 48). New `tests/test_tool_hooks.py` covers both
+  success and error paths for every new surface: pre-hook abort,
+  post-hook success/exception swallowing, `health_extra` 200 / 503 /
+  buggy-callable, `metrics_replace` on/off, public re-exports.
+
 ## [0.2.3] — 2026-05-05
 
 ### Added

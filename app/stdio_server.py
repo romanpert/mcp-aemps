@@ -19,14 +19,12 @@ Or via:    mcp-aemps stdio
 from __future__ import annotations
 
 import asyncio
-import functools
 import logging
-from typing import Any, Awaitable, Callable
+from typing import Any, Sequence
 
 from mcp.server.fastmcp import FastMCP
 
 from app.core import (
-    OperationError,
     core_buscar_en_ficha_tecnica,
     core_buscar_medicamentos,
     core_buscar_vmpp,
@@ -74,36 +72,33 @@ from app.mcp_constants import (
     registro_cambios_description,
     vmpp_description,
 )
+from app.tool_hooks import HookSet, PostHookFn, PreHookFn, wrap_stdio_tool
 
 logger = logging.getLogger(__name__)
 
 
-def _serialize_errors(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
-    """Translate ``OperationError`` into a dict so the LLM gets actionable text.
+def build_server(
+    *,
+    pre_tool_hooks: Sequence[PreHookFn] = (),
+    post_tool_hooks: Sequence[PostHookFn] = (),
+) -> FastMCP:
+    """Construct the FastMCP server with every official CIMA tool.
 
-    Anything else propagates — FastMCP turns it into a tool error response
-    with the traceback redacted, which is the right behaviour for genuine bugs.
+    Pre/post hooks fire around every tool invocation. See ``app.tool_hooks``
+    for the contract. The same hooks should be passed to ``create_app`` so
+    HTTP and stdio transports observe identical audit trails.
     """
-
-    @functools.wraps(func)
-    async def wrapper(*args: Any, **kwargs: Any) -> Any:
-        try:
-            return await func(*args, **kwargs)
-        except OperationError as exc:
-            return exc.to_dict()
-
-    return wrapper
-
-
-def build_server() -> FastMCP:
-    """Construct the FastMCP server with every official CIMA tool."""
     server = FastMCP(name="mcp-aemps", instructions=MCP_AEMPS_SYSTEM_PROMPT)
+    hooks = HookSet.from_sequences(pre=pre_tool_hooks, post=post_tool_hooks)
+
+    def _wrap(func):
+        return wrap_stdio_tool(hooks, func)
 
     # ------------------------------------------------------------------
     # Medicamentos
     # ------------------------------------------------------------------
     @server.tool(description=medicamento_description)
-    @_serialize_errors
+    @_wrap
     async def obtener_medicamento(
         cn: str | None = None,
         nregistro: str | None = None,
@@ -111,7 +106,7 @@ def build_server() -> FastMCP:
         return await core_obtener_medicamento(cn=cn, nregistro=nregistro)
 
     @server.tool(description=medicamentos_description)
-    @_serialize_errors
+    @_wrap
     async def buscar_medicamentos(
         nombre: str | None = None,
         laboratorio: str | None = None,
@@ -146,7 +141,7 @@ def build_server() -> FastMCP:
         )
 
     @server.tool(description=buscar_ficha_tecnica_description)
-    @_serialize_errors
+    @_wrap
     async def buscar_en_ficha_tecnica(reglas: list[dict[str, Any]]) -> dict[str, Any]:
         return await core_buscar_en_ficha_tecnica(reglas)
 
@@ -154,7 +149,7 @@ def build_server() -> FastMCP:
     # Presentaciones / VMP / Maestras
     # ------------------------------------------------------------------
     @server.tool(description=presentaciones_description)
-    @_serialize_errors
+    @_wrap
     async def listar_presentaciones(
         cn: str | None = None,
         nregistro: str | None = None,
@@ -174,12 +169,12 @@ def build_server() -> FastMCP:
         )
 
     @server.tool(description=presentacion_description)
-    @_serialize_errors
+    @_wrap
     async def obtener_presentacion(cn: list[str]) -> dict[str, Any]:
         return await core_obtener_presentacion(cn=cn)
 
     @server.tool(description=vmpp_description)
-    @_serialize_errors
+    @_wrap
     async def buscar_vmpp(
         practiv1: str | None = None,
         idpractiv1: str | None = None,
@@ -196,7 +191,7 @@ def build_server() -> FastMCP:
         )
 
     @server.tool(description=maestras_description)
-    @_serialize_errors
+    @_wrap
     async def consultar_maestras(
         maestra: int | None = None,
         nombre: str | None = None,
@@ -218,7 +213,7 @@ def build_server() -> FastMCP:
     # Vigilancia
     # ------------------------------------------------------------------
     @server.tool(description=registro_cambios_description)
-    @_serialize_errors
+    @_wrap
     async def registro_cambios(
         fecha: str | None = None,
         nregistro: list[str] | None = None,
@@ -227,7 +222,7 @@ def build_server() -> FastMCP:
         return await core_registro_cambios(fecha=fecha, nregistro=nregistro, metodo=metodo)
 
     @server.tool(description=problemas_suministro_description)
-    @_serialize_errors
+    @_wrap
     async def problemas_suministro(
         cn: list[str] | None = None,
         nregistro: list[str] | None = None,
@@ -239,32 +234,32 @@ def build_server() -> FastMCP:
         )
 
     @server.tool(description=problemas_suministro_dcp_description)
-    @_serialize_errors
+    @_wrap
     async def problemas_suministro_dcp(cod_dcp: str) -> dict[str, Any]:
         return await core_problemas_suministro_dcp(cod_dcp=cod_dcp)
 
     @server.tool(description=problemas_suministro_dcpf_description)
-    @_serialize_errors
+    @_wrap
     async def problemas_suministro_dcpf(cod_dcpf: str) -> dict[str, Any]:
         return await core_problemas_suministro_dcpf(cod_dcpf=cod_dcpf)
 
     @server.tool(description=listar_notas_description)
-    @_serialize_errors
+    @_wrap
     async def listar_notas(nregistro: list[str]) -> dict[str, Any]:
         return await core_listar_notas(nregistro=nregistro)
 
     @server.tool(description=obtener_notas_description)
-    @_serialize_errors
+    @_wrap
     async def obtener_notas(nregistros: list[str]) -> dict[str, Any]:
         return await core_obtener_notas(nregistros=nregistros)
 
     @server.tool(description=listar_materiales_description)
-    @_serialize_errors
+    @_wrap
     async def listar_materiales(nregistro: list[str]) -> dict[str, Any]:
         return await core_listar_materiales(nregistro=nregistro)
 
     @server.tool(description=obtener_materiales_description)
-    @_serialize_errors
+    @_wrap
     async def obtener_materiales(nregistro: str) -> dict[str, Any]:
         return await core_obtener_materiales(nregistro=nregistro)
 
@@ -272,7 +267,7 @@ def build_server() -> FastMCP:
     # Documentos segmentados (FT, prospecto)
     # ------------------------------------------------------------------
     @server.tool(description=doc_secciones_description)
-    @_serialize_errors
+    @_wrap
     async def doc_secciones(
         tipo_doc: int,
         nregistro: list[str] | None = None,
@@ -281,7 +276,7 @@ def build_server() -> FastMCP:
         return await core_doc_secciones(tipo_doc=tipo_doc, nregistro=nregistro, cn=cn)
 
     @server.tool(description=doc_contenido_description)
-    @_serialize_errors
+    @_wrap
     async def doc_contenido(
         tipo_doc: int,
         nregistro: str | None = None,
@@ -298,24 +293,24 @@ def build_server() -> FastMCP:
         return result
 
     @server.tool(description=html_ft_description)
-    @_serialize_errors
+    @_wrap
     async def html_ficha_tecnica(nregistro: str, filename: str = "FichaTecnica.html") -> str:
         return await core_html_ficha_tecnica(nregistro=nregistro, filename=filename)
 
     @server.tool(description=html_ft_multiple_description)
-    @_serialize_errors
+    @_wrap
     async def html_ficha_tecnica_multiple(
         nregistro: list[str], filename: str = "FichaTecnica.html"
     ) -> dict[str, Any]:
         return await core_html_ficha_tecnica_multiple(nregistro=nregistro, filename=filename)
 
     @server.tool(description=html_p_description)
-    @_serialize_errors
+    @_wrap
     async def html_prospecto(nregistro: str, filename: str = "Prospecto.html") -> str:
         return await core_html_prospecto(nregistro=nregistro, filename=filename)
 
     @server.tool(description=html_p_multiple_description)
-    @_serialize_errors
+    @_wrap
     async def html_prospecto_multiple(
         nregistro: list[str], filename: str = "Prospecto.html"
     ) -> dict[str, Any]:
