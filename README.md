@@ -188,6 +188,127 @@ points (see `app/factory.py`).
 
 ---
 
+## Tool Annotations
+
+Every CIMA tool ships with the [MCP tool annotations](https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations/)
+that compliant clients (Claude Desktop, ChatGPT Dev Mode, Cursor, Continue,
+Zed, JetBrains Junie, …) use to drive their auto-approve UI:
+
+| Hint              | Value | Reason                                                      |
+|-------------------|-------|-------------------------------------------------------------|
+| `readOnlyHint`    | true  | The server is a thin proxy — no writes upstream.            |
+| `destructiveHint` | false | No environment mutations, ever.                             |
+| `idempotentHint`  | true  | Same args at the same instant return the same payload.      |
+| `openWorldHint`   | true  | Tools hit the external CIMA HTTP API.                       |
+
+This means clients that respect the spec will not prompt for confirmation
+on every CIMA query — they only gate calls where the annotations actually
+warrant caution. For Claude Code specifically, see the next section to
+build your own confirmation gates regardless of annotation hints.
+
+---
+
+## Integrating with Claude Code hooks
+
+Claude Code's [hooks system](https://docs.anthropic.com/claude-code/hooks)
+fires shell commands client-side around every tool invocation, including
+calls to MCP servers like mcp-aemps. The matcher `mcp__mcp-aemps__*`
+catches every tool exposed by this server. Three concrete recipes to drop
+into `~/.claude/settings.json`:
+
+### 1 · Audit every mcp-aemps call to a JSONL log
+
+Useful for GMP Annex 11 / EMA GVP audit trails — full record of which
+tool was invoked with which arguments, when, by which session.
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__mcp-aemps__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -c '{ts: now, session: .session_id, tool: .tool_name, args: .tool_input}' >> ~/.claude/audit/mcp-aemps.jsonl"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The hook receives the tool call as JSON on stdin; `jq` flattens it to
+one line per call. Rotate `~/.claude/audit/` with `logrotate` or your
+SIEM agent.
+
+### 2 · Gate image downloads behind explicit confirmation
+
+`descargar_imagenes` returns base64-encoded medication images that can
+be large and bandwidth-expensive. Block the call unless the user has
+opted in via an env-var flag.
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__mcp-aemps__descargar_imagenes",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ \"$MCP_AEMPS_ALLOW_IMAGES\" = '1' ] || { echo 'Set MCP_AEMPS_ALLOW_IMAGES=1 to authorise image downloads' >&2; exit 2; }"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Exit code `2` aborts the tool call and returns the stderr message to the
+model — Claude Code surfaces it as a denied tool with reason.
+
+### 3 · Ship per-tool latency to a SIEM
+
+Pair `PreToolUse` (timer start) with `PostToolUse` (timer stop) and POST
+the delta plus tool name to your SIEM ingestion endpoint.
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__mcp-aemps__.*",
+        "hooks": [
+          { "type": "command", "command": "date +%s%N > /tmp/mcp-aemps.start" }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__mcp-aemps__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "END=$(date +%s%N); START=$(cat /tmp/mcp-aemps.start); ELAPSED_MS=$(( (END - START) / 1000000 )); jq -c --arg ms \"$ELAPSED_MS\" '{ts: now, tool: .tool_name, latency_ms: ($ms|tonumber), success: (.tool_response.error == null)}' | curl -sS -X POST -H 'content-type: application/json' --data-binary @- https://siem.example.com/ingest/mcp"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+> **Server-side equivalent.** mcp-aemps also exposes `pre_tool_hooks` /
+> `post_tool_hooks` on `create_app(...)` so the same audit trail can be
+> emitted server-side regardless of which MCP client is connected
+> (useful for shared deployments where you can't rely on every user
+> having the right `~/.claude/settings.json`). See `app/tool_hooks.py`.
+
+---
+
 ## Security
 
 - Non-root Docker user (UID 10001)

@@ -19,6 +19,32 @@ Suministro). The wrapper parses them to ISO-8601 in ``parse_cima_fechas``
 helpers, so tool results expose human-readable dates.
 """
 
+from __future__ import annotations
+
+from mcp.types import ToolAnnotations
+
+# ---------------------------------------------------------------------------
+# Tool annotations — uniform across all 21 official CIMA tools
+# ---------------------------------------------------------------------------
+# CIMA is a public, read-only registry. Every mcp-aemps tool is therefore:
+#   * read-only (no writes upstream — we are a thin proxy);
+#   * non-destructive (no environment mutations of any kind);
+#   * idempotent (same args at the same instant return the same payload —
+#     CIMA versions its records, so call-twice == call-once for state);
+#   * open-world (we hit an external HTTP API outside our process).
+#
+# Setting these hints lets MCP clients (Claude Desktop, ChatGPT Dev Mode,
+# Cursor, Continue, Zed, JetBrains Junie, Codex …) auto-approve calls in
+# their UI instead of treating every tool as potentially destructive. See
+# https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations/
+READ_ONLY_AEMPS_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=True,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=True,
+)
+
+
 # ---------------------------------------------------------------------------
 # System prompt — agent-level guidance
 # ---------------------------------------------------------------------------

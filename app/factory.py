@@ -37,15 +37,14 @@ from app.config import settings
 from app.core import OperationError
 from app.lifespan import build_lifespan
 from app.logging_setup import configure_logging
-from app.tool_hooks import EMPTY_HOOKS, HookSet, PostHookFn, PreHookFn
-
-logger = logging.getLogger("mcp.aemps")
-
-# Routes
+from app.mcp_constants import READ_ONLY_AEMPS_ANNOTATIONS
 from app.routes.datos_locales import router as datos_locales_router
 from app.routes.documentos import router as documentos_router
 from app.routes.medicamentos import router as medicamentos_router
 from app.routes.vigilancia import router as vigilancia_router
+from app.tool_hooks import EMPTY_HOOKS, HookSet, PostHookFn, PreHookFn
+
+logger = logging.getLogger("mcp.aemps")
 
 LifecycleHook = Callable[[FastAPI], Awaitable[None]]
 MiddlewareSpec = Union[Type[BaseHTTPMiddleware], Tuple[Type[BaseHTTPMiddleware], dict[str, Any]]]
@@ -200,6 +199,12 @@ def create_app(
 
     if mount_mcp:
         mcp = FastApiMCP(app, name=title, description=description)
+        # fastapi-mcp 0.4.x doesn't propagate ToolAnnotations from the OpenAPI
+        # route — the Tool objects are built then mutated post-construction.
+        # Every CIMA tool is read-only/idempotent/open-world, so paint them
+        # uniformly. Per-tool overrides go in app.mcp_constants if ever needed.
+        for tool in mcp.tools:
+            tool.annotations = READ_ONLY_AEMPS_ANNOTATIONS
         mcp.mount_http()
 
     if settings.metrics_key is None:

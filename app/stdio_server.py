@@ -50,6 +50,7 @@ from app.core import (
 from app.logging_setup import configure_logging
 from app.mcp_constants import (
     MCP_AEMPS_SYSTEM_PROMPT,
+    READ_ONLY_AEMPS_ANNOTATIONS,
     buscar_ficha_tecnica_description,
     doc_contenido_description,
     doc_secciones_description,
@@ -94,10 +95,16 @@ def build_server(
     def _wrap(func):
         return wrap_stdio_tool(hooks, func)
 
+    # Curry FastMCP.tool so every CIMA tool inherits the uniform read-only
+    # annotations. Per-tool overrides (e.g. a future write tool) can still
+    # call ``server.tool(annotations=...)`` directly.
+    def _tool(*, description: str):
+        return server.tool(description=description, annotations=READ_ONLY_AEMPS_ANNOTATIONS)
+
     # ------------------------------------------------------------------
     # Medicamentos
     # ------------------------------------------------------------------
-    @server.tool(description=medicamento_description)
+    @_tool(description=medicamento_description)
     @_wrap
     async def obtener_medicamento(
         cn: str | None = None,
@@ -105,7 +112,7 @@ def build_server(
     ) -> dict[str, Any]:
         return await core_obtener_medicamento(cn=cn, nregistro=nregistro)
 
-    @server.tool(description=medicamentos_description)
+    @_tool(description=medicamentos_description)
     @_wrap
     async def buscar_medicamentos(
         nombre: str | None = None,
@@ -140,7 +147,7 @@ def build_server(
             pagina=pagina,
         )
 
-    @server.tool(description=buscar_ficha_tecnica_description)
+    @_tool(description=buscar_ficha_tecnica_description)
     @_wrap
     async def buscar_en_ficha_tecnica(reglas: list[dict[str, Any]]) -> dict[str, Any]:
         return await core_buscar_en_ficha_tecnica(reglas)
@@ -148,7 +155,7 @@ def build_server(
     # ------------------------------------------------------------------
     # Presentaciones / VMP / Maestras
     # ------------------------------------------------------------------
-    @server.tool(description=presentaciones_description)
+    @_tool(description=presentaciones_description)
     @_wrap
     async def listar_presentaciones(
         cn: str | None = None,
@@ -168,12 +175,12 @@ def build_server(
             estuopsico=estuopsico, pagina=pagina,
         )
 
-    @server.tool(description=presentacion_description)
+    @_tool(description=presentacion_description)
     @_wrap
     async def obtener_presentacion(cn: list[str]) -> dict[str, Any]:
         return await core_obtener_presentacion(cn=cn)
 
-    @server.tool(description=vmpp_description)
+    @_tool(description=vmpp_description)
     @_wrap
     async def buscar_vmpp(
         practiv1: str | None = None,
@@ -190,7 +197,7 @@ def build_server(
             atc=atc, nombre=nombre, modoArbol=modoArbol, pagina=pagina,
         )
 
-    @server.tool(description=maestras_description)
+    @_tool(description=maestras_description)
     @_wrap
     async def consultar_maestras(
         maestra: int | None = None,
@@ -212,7 +219,7 @@ def build_server(
     # ------------------------------------------------------------------
     # Vigilancia
     # ------------------------------------------------------------------
-    @server.tool(description=registro_cambios_description)
+    @_tool(description=registro_cambios_description)
     @_wrap
     async def registro_cambios(
         fecha: str | None = None,
@@ -221,7 +228,7 @@ def build_server(
     ) -> dict[str, Any]:
         return await core_registro_cambios(fecha=fecha, nregistro=nregistro, metodo=metodo)
 
-    @server.tool(description=problemas_suministro_description)
+    @_tool(description=problemas_suministro_description)
     @_wrap
     async def problemas_suministro(
         cn: list[str] | None = None,
@@ -233,32 +240,32 @@ def build_server(
             cn=cn, nregistro=nregistro, pagina=pagina, tamanioPagina=tamanioPagina,
         )
 
-    @server.tool(description=problemas_suministro_dcp_description)
+    @_tool(description=problemas_suministro_dcp_description)
     @_wrap
     async def problemas_suministro_dcp(cod_dcp: str) -> dict[str, Any]:
         return await core_problemas_suministro_dcp(cod_dcp=cod_dcp)
 
-    @server.tool(description=problemas_suministro_dcpf_description)
+    @_tool(description=problemas_suministro_dcpf_description)
     @_wrap
     async def problemas_suministro_dcpf(cod_dcpf: str) -> dict[str, Any]:
         return await core_problemas_suministro_dcpf(cod_dcpf=cod_dcpf)
 
-    @server.tool(description=listar_notas_description)
+    @_tool(description=listar_notas_description)
     @_wrap
     async def listar_notas(nregistro: list[str]) -> dict[str, Any]:
         return await core_listar_notas(nregistro=nregistro)
 
-    @server.tool(description=obtener_notas_description)
+    @_tool(description=obtener_notas_description)
     @_wrap
     async def obtener_notas(nregistros: list[str]) -> dict[str, Any]:
         return await core_obtener_notas(nregistros=nregistros)
 
-    @server.tool(description=listar_materiales_description)
+    @_tool(description=listar_materiales_description)
     @_wrap
     async def listar_materiales(nregistro: list[str]) -> dict[str, Any]:
         return await core_listar_materiales(nregistro=nregistro)
 
-    @server.tool(description=obtener_materiales_description)
+    @_tool(description=obtener_materiales_description)
     @_wrap
     async def obtener_materiales(nregistro: str) -> dict[str, Any]:
         return await core_obtener_materiales(nregistro=nregistro)
@@ -266,7 +273,7 @@ def build_server(
     # ------------------------------------------------------------------
     # Documentos segmentados (FT, prospecto)
     # ------------------------------------------------------------------
-    @server.tool(description=doc_secciones_description)
+    @_tool(description=doc_secciones_description)
     @_wrap
     async def doc_secciones(
         tipo_doc: int,
@@ -275,7 +282,7 @@ def build_server(
     ) -> dict[str, Any]:
         return await core_doc_secciones(tipo_doc=tipo_doc, nregistro=nregistro, cn=cn)
 
-    @server.tool(description=doc_contenido_description)
+    @_tool(description=doc_contenido_description)
     @_wrap
     async def doc_contenido(
         tipo_doc: int,
@@ -292,24 +299,24 @@ def build_server(
             return result["content"]
         return result
 
-    @server.tool(description=html_ft_description)
+    @_tool(description=html_ft_description)
     @_wrap
     async def html_ficha_tecnica(nregistro: str, filename: str = "FichaTecnica.html") -> str:
         return await core_html_ficha_tecnica(nregistro=nregistro, filename=filename)
 
-    @server.tool(description=html_ft_multiple_description)
+    @_tool(description=html_ft_multiple_description)
     @_wrap
     async def html_ficha_tecnica_multiple(
         nregistro: list[str], filename: str = "FichaTecnica.html"
     ) -> dict[str, Any]:
         return await core_html_ficha_tecnica_multiple(nregistro=nregistro, filename=filename)
 
-    @server.tool(description=html_p_description)
+    @_tool(description=html_p_description)
     @_wrap
     async def html_prospecto(nregistro: str, filename: str = "Prospecto.html") -> str:
         return await core_html_prospecto(nregistro=nregistro, filename=filename)
 
-    @server.tool(description=html_p_multiple_description)
+    @_tool(description=html_p_multiple_description)
     @_wrap
     async def html_prospecto_multiple(
         nregistro: list[str], filename: str = "Prospecto.html"

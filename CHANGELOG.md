@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5] — 2026-05-06
+
+### Added
+- **MCP tool annotations on all 21 tools** (`readOnlyHint`,
+  `destructiveHint=false`, `idempotentHint`, `openWorldHint`). Compliant
+  clients (Claude Desktop, ChatGPT Dev Mode, Cursor, Continue, Zed,
+  JetBrains Junie, Codex …) now surface CIMA tools as safe reads
+  instead of treating every call as potentially destructive — fixes
+  the "shows up as a write tool in ChatGPT Dev Mode" UX paper-cut.
+  Annotations are mutated post-construction on the HTTP transport
+  because `fastapi-mcp` 0.4.x doesn't propagate them from OpenAPI;
+  stdio uses `FastMCP`'s native `annotations=` kwarg.
+- **README · Tool Annotations** section documents the per-hint
+  rationale.
+- **README · Integrating with Claude Code hooks** section ships three
+  copy-pasteable recipes against the `mcp__mcp-aemps__*` matcher:
+  JSONL audit log (GMP Annex 11 / EMA GVP friendly), env-flag-gated
+  `descargar_imagenes`, and per-tool latency POST to a SIEM. Plus a
+  pointer to the server-side `pre_tool_hooks` / `post_tool_hooks`
+  equivalent for shared deployments.
+
+### Fixed
+- `app/factory.py` ruff E402 — route imports were below the module-level
+  `logger` assignment. Moved imports above so the import block is
+  contiguous and `ruff check app/` is clean.
+
+### Tests
+- 65/65 passing (was 63). New invariants in
+  `tests/test_stdio_server.py` pin annotation values across both
+  transports — drift now fails CI.
+
 ## [0.2.4] — 2026-05-06
 
 ### Added
