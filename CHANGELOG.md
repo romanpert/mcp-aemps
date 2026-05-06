@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6] — 2026-05-06
+
+### Added
+- **9 curated MCP Prompts** — server-defined workflow templates that
+  orchestrate the right CIMA tool calls for the most common
+  professional and patient flows. New module `app/prompts.py`
+  containing the catalogue + `register_prompts(server)` integration.
+  Available on the **stdio** transport (`uvx mcp-aemps stdio`); HTTP
+  transport via `fastapi-mcp 0.4.x` does not yet expose a prompts
+  surface — tracked for v0.3.
+
+  | Prompt | Segmento |
+  |---|---|
+  | `identificar_cn` | Farmacia comunitaria |
+  | `equivalencias_genericas` | Farmacia comunitaria |
+  | `vigilancia_paciente` | Farmacia hospitalaria (EMA GVP Module VI) |
+  | `comparar_fichas_tecnicas` | Hospital + industria |
+  | `auditar_cartera_laboratorio` | Industria · BI / due diligence |
+  | `monitorizar_cambios_cartera` | Industria · regulatory affairs |
+  | `informe_posicionamiento_terapeutico` | Hospital + industria |
+  | `material_visual_paciente` | Counseling al paciente |
+  | `info_medicamento_para_no_sanitarios` | Público general |
+
+  Los prompts aprovechan campos del payload de `obtener_medicamento`
+  que estaban infrautilizados — `docs[]` (Ficha Técnica, Prospecto,
+  Informe Público de Evaluación, Plan de Gestión de Riesgos),
+  `fotos[]` (caja + forma farmacéutica) y la combinación
+  `materialesInf` + `obtener_materiales` (vídeos de uso para
+  inhaladores, plumas de insulina, autoinyectores) — en lugar de
+  tratar CIMA como un simple lookup.
+- **README · Curated MCP Prompts** documenta el catálogo, la semántica
+  por segmento, y muestra un ejemplo de invocación programática con
+  el SDK MCP de Python.
+
+### Safety
+- Los dos prompts dirigidos a pacientes (`material_visual_paciente`,
+  `info_medicamento_para_no_sanitarios`) cierran obligatoriamente con
+  un disclaimer "no es consejo médico — consulte a su médico o
+  farmacéutico". Cubierto por test; su eliminación accidental rompe
+  CI. Marco MDR 2017/745 — este server no es un dispositivo médico.
+
+### Tests
+- 86/86 passing (was 65). Nuevo `tests/test_prompts.py` con 21 tests:
+  catalog drift, required-args contract, body-orchestrates-tool,
+  patient-facing disclaimer, edge-case input validation.
+
 ## [0.2.5] — 2026-05-06
 
 ### Added

@@ -208,6 +208,74 @@ build your own confirmation gates regardless of annotation hints.
 
 ---
 
+## Curated MCP Prompts
+
+mcp-aemps ships **9 curated [MCP Prompts](https://modelcontextprotocol.io/specification/server/prompts)** —
+server-defined workflow templates you invoke explicitly from your MCP
+client (Claude Desktop, Continue, Cursor, Zed, …). They orchestrate the
+right CIMA tool calls for the most common professional and patient
+workflows, so you don't have to remember which tools to chain.
+
+> **Transport availability**: Prompts ship on the **stdio** transport
+> (`uvx mcp-aemps stdio`). The HTTP transport via `fastapi-mcp 0.4.x`
+> does not yet expose a prompts surface — tracked for v0.3.
+
+### Catalogue
+
+| Prompt | Args | Caso de uso |
+|---|---|---|
+| **`identificar_cn`** | `cn` | **Farmacia comunitaria** — el paciente trae una caja con un Código Nacional; tarjeta resumen one-screen con autorización, comercialización, receta, alertas activas, suministro, fotos oficiales y enlaces a documentación AEMPS. |
+| **`equivalencias_genericas`** | `nregistro`, `comercializados_solo?` | **Farmacia comunitaria** — sustitución durante un desabastecimiento. Mismo principio activo + dosis + forma farmacéutica, con foto de la caja para confirmar visualmente. |
+| **`vigilancia_paciente`** | `nregistros[]` | **Farmacia hospitalaria** — revisión de notas de seguridad activas para la cartera de medicación de un paciente. Alineado con EMA GVP Module VI. |
+| **`comparar_fichas_tecnicas`** | `nregistros[]`, `secciones?` | **Hospital + industria** — tabla wide-format comparando 2-5 medicamentos sección a sección de la FT (4.1, 4.2, 4.3, 4.4, 4.5, 4.8 por defecto). |
+| **`auditar_cartera_laboratorio`** | `laboratorio`, `incluir_no_comercializados?` | **Industria** — snapshot regulatorio completo de un laboratorio: métricas globales, áreas terapéuticas (ATC), triángulo negro, top con notas activas, riesgos de suministro, presencia de IPT. |
+| **`monitorizar_cambios_cartera`** | `nregistros[]`, `desde_fecha?` | **Industria · regulatory affairs** — detecta cambios (alta, baja, modificación de FT/prospecto/comercialización/notas) sobre una lista de productos en un periodo. |
+| **`informe_posicionamiento_terapeutico`** | `nregistro` | **Hospital + industria** — recupera el Informe Público de Evaluación (IPE/IPT) de AEMPS junto con la indicación autorizada (FT 4.1) y el mecanismo de acción (FT 5.1). Marca explícitamente cuando AEMPS no ha publicado IPT. |
+| **`material_visual_paciente`** | `nregistro` | **Counseling al paciente** — fotos de la caja y de la pastilla, vídeos de uso (inhaladores, plumas de insulina, autoinyectores), material informativo segregado por audiencia. Cierra con disclaimer. |
+| **`info_medicamento_para_no_sanitarios`** | `nombre_o_cn` | **Público general** — resumen llano sin jerga: qué es, para qué se usa, cómo es (fotos), alertas activas, dónde leer más. Cierra con disclaimer obligatorio "no es consejo médico". |
+
+### Cómo se invoca
+
+En Claude Desktop (cuando el cliente lo soporta), aparecen como
+slash-commands `/mcp__mcp-aemps__<nombre>` en el menú de prompts, o se
+pueden listar via `prompts/list` desde cualquier cliente MCP-compliant.
+
+Ejemplo programático con el SDK MCP de Python:
+
+```python
+from mcp.client.stdio import stdio_client, StdioServerParameters
+from mcp import ClientSession
+
+params = StdioServerParameters(command="uvx", args=["mcp-aemps", "stdio"])
+async with stdio_client(params) as (read, write):
+    async with ClientSession(read, write) as session:
+        await session.initialize()
+        prompts = await session.list_prompts()
+        result = await session.get_prompt(
+            "identificar_cn",
+            arguments={"cn": "12345"},
+        )
+        # result.messages[0].content.text → el cuerpo del prompt listo para enviar al LLM
+```
+
+### Diseño
+
+Cada prompt instruye al LLM **qué herramientas llamar, en qué orden y
+cómo formatear la salida**. Aprovechan la riqueza del payload de
+`obtener_medicamento` (que incluye `docs[]` con Ficha Técnica,
+Prospecto, Informe Público de Evaluación y Plan de Gestión de Riesgos;
+`fotos[]` con la caja y la forma farmacéutica; el flag `materialesInf`
+para vídeos vía `obtener_materiales`) en lugar de tratar CIMA como un
+simple lookup de campos.
+
+Los prompts **dirigidos a pacientes** (`material_visual_paciente`,
+`info_medicamento_para_no_sanitarios`) cierran siempre con un
+disclaimer explícito "no es consejo médico — consulte a su médico o
+farmacéutico". Está cubierto por test (`tests/test_prompts.py`); su
+eliminación accidental rompe CI.
+
+---
+
 ## Integrating with Claude Code hooks
 
 Claude Code's [hooks system](https://docs.anthropic.com/claude-code/hooks)

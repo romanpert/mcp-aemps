@@ -73,6 +73,7 @@ from app.mcp_constants import (
     registro_cambios_description,
     vmpp_description,
 )
+from app.prompts import register_prompts
 from app.tool_hooks import HookSet, PostHookFn, PreHookFn, wrap_stdio_tool
 
 logger = logging.getLogger(__name__)
@@ -364,6 +365,12 @@ def build_server(
         nregistro: list[str], filename: str = "Prospecto.html"
     ) -> dict[str, Any]:
         return await core_html_prospecto_multiple(nregistro=nregistro, filename=filename)
+
+    # ------------------------------------------------------------------
+    # Curated MCP Prompts — workflows for farmacia / hospital / industria /
+    # non-specialist users. See app/prompts.py for the full catalogue.
+    # ------------------------------------------------------------------
+    register_prompts(server)
 
     return server
 
