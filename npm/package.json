@@ -1,6 +1,6 @@
 {
   "name": "mcp-aemps",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "MCP server for the Spanish AEMPS CIMA pharmaceutical registry — npm wrapper that delegates to `uvx mcp-aemps`.",
   "keywords": [
     "mcp",

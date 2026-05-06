@@ -90,31 +90,31 @@ def test_every_stdio_tool_has_read_only_annotations() -> None:
     assert not wrong, f"tools with wrong annotation values: {wrong}"
 
 
-def test_every_http_tool_has_read_only_annotations() -> None:
-    """Cross-transport parity for tool annotations — fastapi-mcp doesn't
-    propagate them automatically, so the factory mutates them after
-    FastApiMCP() construction. Verify the mutation took effect."""
-    from fastapi_mcp import FastApiMCP
+def test_http_transport_uses_the_same_fastmcp_server() -> None:
+    """Since v0.2.7 the HTTP transport no longer goes via fastapi-mcp's
+    OpenAPI→tools indirection — it mounts the same FastMCP instance that
+    powers stdio. So tool annotations, prompts and resources are
+    automatically identical across transports: there is only one server.
 
+    This test pins the architecture: ``app.state.mcp_server`` must be a
+    FastMCP instance equivalent to ``build_server()`` output."""
     from app.factory import create_app
+    from app.stdio_server import build_server
 
-    app = create_app(mount_mcp=False)
-    # Build the MCP layer the same way create_app does, so we inspect the
-    # exact Tool objects that ship.
-    mcp = FastApiMCP(app, name=app.title, description=app.description)
-    from app.mcp_constants import READ_ONLY_AEMPS_ANNOTATIONS
-
-    for tool in mcp.tools:
-        tool.annotations = READ_ONLY_AEMPS_ANNOTATIONS
-
-    assert mcp.tools, "FastApiMCP produced zero tools — wiring is broken"
-    for t in mcp.tools:
-        ann = t.annotations
-        assert ann is not None, f"http tool {t.name} missing annotations"
-        assert ann.readOnlyHint is True, t.name
-        assert ann.destructiveHint is False, t.name
-        assert ann.idempotentHint is True, t.name
-        assert ann.openWorldHint is True, t.name
+    app = create_app()
+    assert hasattr(app.state, "mcp_server"), (
+        "create_app(mount_mcp=True) must store the FastMCP server on app.state.mcp_server"
+    )
+    server = app.state.mcp_server
+    fresh = build_server()
+    fresh_tools = {t.name for t in asyncio.run(fresh.list_tools())}
+    http_tools = {t.name for t in asyncio.run(server.list_tools())}
+    assert http_tools == fresh_tools, "HTTP-mounted MCP tools must match build_server() output"
+    # Annotations are now native — no post-construction mutation needed.
+    for tool in asyncio.run(server.list_tools()):
+        assert tool.annotations is not None, f"{tool.name}: HTTP tool missing annotations"
+        assert tool.annotations.readOnlyHint is True, tool.name
+        assert tool.annotations.openWorldHint is True, tool.name
 
 
 def test_http_and_stdio_expose_the_same_tools() -> None:

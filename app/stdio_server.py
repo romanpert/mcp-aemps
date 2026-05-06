@@ -74,6 +74,7 @@ from app.mcp_constants import (
     vmpp_description,
 )
 from app.prompts import register_prompts
+from app.resources import register_resources
 from app.tool_hooks import HookSet, PostHookFn, PreHookFn, wrap_stdio_tool
 
 logger = logging.getLogger(__name__)
@@ -83,14 +84,28 @@ def build_server(
     *,
     pre_tool_hooks: Sequence[PreHookFn] = (),
     post_tool_hooks: Sequence[PostHookFn] = (),
+    streamable_http_path: str = "/mcp",
 ) -> FastMCP:
-    """Construct the FastMCP server with every official CIMA tool.
+    """Construct the FastMCP server with every official CIMA tool, prompt,
+    and resource.
 
-    Pre/post hooks fire around every tool invocation. See ``app.tool_hooks``
-    for the contract. The same hooks should be passed to ``create_app`` so
-    HTTP and stdio transports observe identical audit trails.
+    Single source of truth for both the stdio transport (``mcp-aemps stdio``)
+    and the HTTP Streamable transport mounted by ``app.factory.create_app``.
+
+    * ``pre_tool_hooks`` / ``post_tool_hooks`` fire around every tool
+      invocation regardless of transport (see ``app.tool_hooks``).
+    * ``streamable_http_path`` controls where FastMCP serves the
+      Streamable-HTTP endpoint relative to its own Starlette root. Default
+      ``/mcp`` matches the CLI's standalone behaviour. ``create_app``
+      passes ``"/"`` so it can mount the resulting app at ``/mcp`` in the
+      outer FastAPI app — mounting at ``/mcp`` with the default would
+      double the prefix to ``/mcp/mcp``.
     """
-    server = FastMCP(name="mcp-aemps", instructions=MCP_AEMPS_SYSTEM_PROMPT)
+    server = FastMCP(
+        name="mcp-aemps",
+        instructions=MCP_AEMPS_SYSTEM_PROMPT,
+        streamable_http_path=streamable_http_path,
+    )
     hooks = HookSet.from_sequences(pre=pre_tool_hooks, post=post_tool_hooks)
 
     def _wrap(func):
@@ -371,6 +386,12 @@ def build_server(
     # non-specialist users. See app/prompts.py for the full catalogue.
     # ------------------------------------------------------------------
     register_prompts(server)
+
+    # ------------------------------------------------------------------
+    # Curated MCP Resources — ``cima://`` URIs for streaming docs and
+    # cacheable maestras. See app/resources.py for the full catalogue.
+    # ------------------------------------------------------------------
+    register_resources(server)
 
     return server
 

@@ -5,6 +5,72 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7] — 2026-05-06
+
+### Added
+- **MCP Resources** — 5 static + 6 templated resources under the
+  `cima://` URI scheme. New module `app/resources.py` +
+  `register_resources(server)` integration.
+
+  Static (auto-discoverable via `resources/list`):
+  `cima://maestras/{atc,principios-activos,laboratorios,formas-farmaceuticas,vias-administracion}`.
+
+  Templates (`resources/templates/list`):
+  `cima://maestras/atc/{codigo}`,
+  `cima://maestras/principios-activos/{id}`,
+  `cima://docs/ficha-tecnica/{nregistro}[/{seccion}]`,
+  `cima://docs/prospecto/{nregistro}[/{seccion}]`.
+
+  Beneficios:
+  * **Streaming**: HTML completo de FT/Prospecto fluye al cliente sin
+    pasar por una llamada a tool — addresses ROADMAP "Beyond 1.0" item
+    #1 (streaming responses for large HTML / leaflet downloads).
+  * **Cacheabilidad**: las maestras (ATC, principios activos,
+    laboratorios) cambian raramente. Exponerlas como URIs estáticas
+    permite a los clientes cachearlas indefinidamente y elimina el
+    coste de tokens dominante en sesiones interactivas (llamadas
+    repetidas a `consultar_maestras`).
+  * **Discoverability**: las URIs estáticas aparecen en la UI de
+    Claude Desktop / Continue / Cursor sin que el LLM tenga que
+    saber que existen.
+
+### Changed
+- **HTTP transport migrado a FastMCP nativo** (Streamable HTTP). La
+  capa fastapi-mcp 0.4.x se elimina por completo; el endpoint `/mcp`
+  ahora monta directamente el `streamable_http_app()` del FastMCP
+  server compartido con stdio. Beneficios:
+  * **Single source of truth**: los 21 tools, 9 prompts, 11 resources
+    y las anotaciones son el mismo `FastMCP` server detrás de stdio y
+    de `/mcp`. Imposible drift entre transportes.
+  * **Tool annotations nativas**: ya no se mutan los Tool objects
+    post-construcción (era un workaround porque fastapi-mcp 0.4.x no
+    propagaba `annotations` desde la ruta OpenAPI).
+  * **Prompts y resources en HTTP**: la limitación documentada en
+    v0.2.6 ("HTTP no expone prompts") queda resuelta.
+  * **Una indirección menos**: las llamadas MCP via HTTP ya no hacen
+    un round-trip httpx interno hacia las rutas FastAPI — golpean
+    `core_<op>` directamente.
+- `app.lifespan.build_lifespan` acepta `fastmcp_server` opcional para
+  anidar el `session_manager.run()` del FastMCP en el lifespan exterior
+  de FastAPI (necesario porque las sub-apps Starlette montadas no
+  ejecutan su lifespan automáticamente).
+- `app.stdio_server.build_server` acepta `streamable_http_path` para
+  configurar la ruta interna del Streamable-HTTP app (default `/mcp`
+  para uso standalone; `create_app` pasa `"/"` para mounting limpio).
+
+### Removed
+- Dependencia `fastapi-mcp==0.4.0`. Eliminada de `pyproject.toml` y
+  `requirements.txt`. Reduce el árbol de deps y libera futuras
+  decisiones de transporte.
+
+### Tests
+- 94/94 passing (was 86). 9 nuevos tests en `tests/test_resources.py`
+  pinneando el catálogo, MIME types, slugs maestra ↔ id, parámetros
+  de templates, validación de input. Reemplazado el test legado
+  `test_every_http_tool_has_read_only_annotations` por
+  `test_http_transport_uses_the_same_fastmcp_server` que valida que
+  HTTP y stdio comparten el mismo `FastMCP` server.
+
 ## [0.2.6] — 2026-05-06
 
 ### Added

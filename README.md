@@ -208,6 +208,40 @@ build your own confirmation gates regardless of annotation hints.
 
 ---
 
+## Curated MCP Resources
+
+mcp-aemps exposes **5 static resources + 6 templates** under the
+`cima://` URI scheme. Resources are read-only URIs that MCP clients can
+**stream** and **cache** without paying the token cost of a tool call —
+the dominant token waste on interactive sessions.
+
+### Static resources (auto-discoverable in `resources/list`)
+
+| URI | MIME | Content |
+|---|---|---|
+| `cima://maestras/atc` | `application/json` | Árbol completo de códigos ATC |
+| `cima://maestras/principios-activos` | `application/json` | Listado completo de principios activos |
+| `cima://maestras/laboratorios` | `application/json` | Laboratorios titulares de autorización AEMPS |
+| `cima://maestras/formas-farmaceuticas` | `application/json` | Formas farmacéuticas (comprimido, inyectable, …) |
+| `cima://maestras/vias-administracion` | `application/json` | Vías de administración (oral, IV, tópica, …) |
+
+### Templates (`resources/templates/list`)
+
+| URI template | Content |
+|---|---|
+| `cima://maestras/atc/{codigo}` | Lookup ATC por código (p.ej. C09AA02 → Enalapril) |
+| `cima://maestras/principios-activos/{id}` | Lookup principio activo por id AEMPS |
+| `cima://docs/ficha-tecnica/{nregistro}` | HTML completo de la ficha técnica |
+| `cima://docs/ficha-tecnica/{nregistro}/{seccion}` | Sección concreta de la FT (4.1, 4.8, 5.1, …) |
+| `cima://docs/prospecto/{nregistro}` | HTML completo del prospecto |
+| `cima://docs/prospecto/{nregistro}/{seccion}` | Sección concreta del prospecto (1, 2, 3, 4, 5, 6) |
+
+Disponible en **ambos transportes** (stdio y `/mcp` HTTP) — desde v0.2.7
+existe un único `FastMCP` server que sirve tools, prompts y resources
+para los dos lados.
+
+---
+
 ## Curated MCP Prompts
 
 mcp-aemps ships **9 curated [MCP Prompts](https://modelcontextprotocol.io/specification/server/prompts)** —
@@ -216,9 +250,11 @@ client (Claude Desktop, Continue, Cursor, Zed, …). They orchestrate the
 right CIMA tool calls for the most common professional and patient
 workflows, so you don't have to remember which tools to chain.
 
-> **Transport availability**: Prompts ship on the **stdio** transport
-> (`uvx mcp-aemps stdio`). The HTTP transport via `fastapi-mcp 0.4.x`
-> does not yet expose a prompts surface — tracked for v0.3.
+> **Transport availability**: Prompts ship on **both** transports —
+> stdio (`uvx mcp-aemps stdio`) and Streamable HTTP at `/mcp`. Since
+> v0.2.7 the HTTP transport uses FastMCP's native Streamable-HTTP app
+> (no fastapi-mcp indirection), so tools, prompts, resources and
+> annotations are all served from the same FastMCP instance.
 
 ### Catalogue
 

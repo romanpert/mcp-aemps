@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [project]
 name = "mcp-aemps"
-version = "0.2.6"
+version = "0.2.7"
 description = "Open-source MCP server for the Spanish AEMPS CIMA pharmaceutical registry"
 authors = [
   { name = "Román Pérez Dumpert", email = "roman.p98@gmail.com" }
@@ -31,7 +31,10 @@ classifiers = [
 ]
 dependencies = [
   "fastapi==0.116.2",
-  "fastapi-mcp==0.4.0",
+  # fastapi-mcp dropped in v0.2.7: HTTP transport now uses FastMCP's native
+  # Streamable-HTTP app, mounted at /mcp directly. Single FastMCP server
+  # serves both stdio and HTTP — tools, prompts, resources and annotations
+  # share one source of truth.
   "httpx==0.28.1",
   "uvicorn[standard]==0.35.0",
   "typer==0.17.4",

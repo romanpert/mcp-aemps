@@ -28,7 +28,6 @@ from typing import Any, Awaitable, Callable, Sequence, Tuple, Type, Union
 from fastapi import APIRouter, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi_mcp import FastApiMCP
 from pydantic import SecretStr
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.routing import Match
@@ -37,11 +36,11 @@ from app.config import settings
 from app.core import OperationError
 from app.lifespan import build_lifespan
 from app.logging_setup import configure_logging
-from app.mcp_constants import READ_ONLY_AEMPS_ANNOTATIONS
 from app.routes.datos_locales import router as datos_locales_router
 from app.routes.documentos import router as documentos_router
 from app.routes.medicamentos import router as medicamentos_router
 from app.routes.vigilancia import router as vigilancia_router
+from app.stdio_server import build_server
 from app.tool_hooks import EMPTY_HOOKS, HookSet, PostHookFn, PreHookFn
 
 logger = logging.getLogger("mcp.aemps")
@@ -84,9 +83,24 @@ def create_app(
     """
     configure_logging()
 
+    # Build the FastMCP server eagerly so the lifespan can nest its session
+    # manager. ``mount_mcp=False`` skips the HTTP mount but the FastMCP
+    # instance still costs ~zero — keeping construction unconditional makes
+    # tests simpler.
+    mcp_server = (
+        build_server(
+            pre_tool_hooks=pre_tool_hooks,
+            post_tool_hooks=post_tool_hooks,
+            streamable_http_path="/",
+        )
+        if mount_mcp
+        else None
+    )
+
     lifespan = build_lifespan(
         startup_hooks=startup_hooks,
         shutdown_hooks=shutdown_hooks,
+        fastmcp_server=mcp_server,
     )
 
     app = FastAPI(
@@ -193,15 +207,13 @@ def create_app(
     for router in extra_routers:
         app.include_router(router)
 
-    if mount_mcp:
-        mcp = FastApiMCP(app, name=title, description=description)
-        # fastapi-mcp 0.4.x doesn't propagate ToolAnnotations from the OpenAPI
-        # route — the Tool objects are built then mutated post-construction.
-        # Every CIMA tool is read-only/idempotent/open-world, so paint them
-        # uniformly. Per-tool overrides go in app.mcp_constants if ever needed.
-        for tool in mcp.tools:
-            tool.annotations = READ_ONLY_AEMPS_ANNOTATIONS
-        mcp.mount_http()
+    if mcp_server is not None:
+        # Mount FastMCP's Streamable-HTTP app at /mcp. FastMCP is the single
+        # source of truth for tools, prompts, resources and annotations
+        # across both transports — there is no fastapi-mcp indirection any
+        # more, so HTTP MCP clients see the exact same surface as stdio.
+        app.mount("/mcp", mcp_server.streamable_http_app())
+        app.state.mcp_server = mcp_server
 
     if settings.metrics_key is None:
         logger.warning(
