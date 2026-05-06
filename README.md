@@ -202,10 +202,11 @@ uvx mcp-aemps stdio
 MCP_AEMPS_LOCALE=en uvx mcp-aemps stdio
 ```
 
-> The bodies of the curated MCP prompts in `app/prompts.py` stay in
-> Spanish for now — the routing signal for the LLM is the
-> *description*, which is translated. Full prompt body translation is
-> tracked for v0.3.
+> Since v0.2.9 the **full** prompt catalogue (descriptions + bodies +
+> patient-facing disclaimer) ships in both locales. Both locales
+> register the same 9 prompt names with the same arg signatures —
+> clients hard-coding prompt names keep working when you flip the
+> locale.
 
 ---
 

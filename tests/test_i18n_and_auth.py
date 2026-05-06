@@ -81,6 +81,68 @@ def test_invalid_locale_raises_validation_error() -> None:
 
 
 # ---------------------------------------------------------------------------
+# i18n prompt catalogue (added in v0.2.9)
+# ---------------------------------------------------------------------------
+
+
+def test_es_prompts_module_has_9_entries_with_spanish_content() -> None:
+    """Spanish prompt catalogue exposes 9 entries with Spanish content."""
+    import app._prompts_es as es
+
+    assert len(es.ALL_PROMPTS) == 9
+    assert "Aviso legal" in es.PATIENT_FACING_DISCLAIMER
+    assert "consulte a su médico" in es.PATIENT_FACING_DISCLAIMER
+    _, desc, _ = es.ALL_PROMPTS[0]
+    assert "Caso de uso" in desc
+
+
+def test_en_prompts_module_has_9_entries_with_english_content() -> None:
+    """English prompt catalogue exposes 9 entries with English content."""
+    import app._prompts_en as en
+
+    assert len(en.ALL_PROMPTS) == 9
+    assert "Legal notice" in en.PATIENT_FACING_DISCLAIMER
+    assert "doctor or pharmacist" in en.PATIENT_FACING_DISCLAIMER
+    _, desc, _ = en.ALL_PROMPTS[0]
+    assert "Use case" in desc
+
+
+def test_es_and_en_prompts_export_the_same_function_names() -> None:
+    """The two locale modules must register the same set of prompt names —
+    clients that hard-code prompt names keep working when the operator
+    flips ``MCP_AEMPS_LOCALE``."""
+    import app._prompts_en as en
+    import app._prompts_es as es
+
+    es_names = {name for name, _desc, _fn in es.ALL_PROMPTS}
+    en_names = {name for name, _desc, _fn in en.ALL_PROMPTS}
+    assert es_names == en_names, (
+        f"prompt-name drift between locales: only ES={es_names - en_names}, only EN={en_names - es_names}"
+    )
+
+
+def test_en_prompt_body_orchestrates_the_same_tools_as_es() -> None:
+    """A spot check on body parity: both locales must reference the same
+    mcp-aemps tools — different language, identical workflow steps."""
+    import asyncio
+
+    import app._prompts_en as en
+    import app._prompts_es as es
+
+    es_body = asyncio.run(es.identificar_cn(cn="12345"))
+    en_body = asyncio.run(en.identificar_cn(cn="12345"))
+    for tool in (
+        "obtener_presentacion",
+        "obtener_medicamento",
+        "problemas_suministro",
+        "listar_notas",
+        "obtener_notas",
+    ):
+        assert tool in es_body, f"ES body missing tool {tool}"
+        assert tool in en_body, f"EN body missing tool {tool}"
+
+
+# ---------------------------------------------------------------------------
 # OAuth 2.1 — disabled by default
 # ---------------------------------------------------------------------------
 

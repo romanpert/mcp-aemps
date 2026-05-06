@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.9] — 2026-05-06
+
+### Added
+- **i18n EN closure** — full English translation of the curated MCP
+  Prompts catalogue. Closes the deferred work from v0.2.8 (where only
+  tool descriptions and the system prompt were translated; prompt
+  bodies stayed Spanish).
+
+  New private modules:
+  * `app/_prompts_es.py` — the existing Spanish prompts (content
+    unchanged, just relocated and the now-redundant `register_prompts`
+    moved to the dispatcher).
+  * `app/_prompts_en.py` — full English equivalent: 9 prompt
+    functions, `ALL_PROMPTS` tuple with EN descriptions, and the EN
+    `PATIENT_FACING_DISCLAIMER`.
+
+  `app/prompts.py` collapses to a 70-line dispatcher that picks one
+  module or the other based on `MCP_AEMPS_LOCALE` (same pattern as
+  `app/mcp_constants.py` from v0.2.8). `register_prompts(server)`
+  lives here and is called once from `build_server()`.
+
+  Behaviour invariants preserved across locales:
+  * Same 9 prompt **names** — clients hard-coding prompt names keep
+    working when the operator flips the locale.
+  * Same arg signatures — required vs optional unchanged.
+  * Same workflow steps — both bodies reference the same mcp-aemps
+    tools in the same order; only the human-facing language differs.
+  * Both patient-facing prompts (`material_visual_paciente`,
+    `info_medicamento_para_no_sanitarios`) close with the locale's
+    disclaimer ("Aviso legal" in ES, "Legal notice" in EN). The MDR
+    2017/745 framing is preserved verbatim.
+
+### Tests
+- 110/110 passing (was 106). 4 new tests in
+  `tests/test_i18n_and_auth.py`:
+  * Spanish module exposes 9 entries with Spanish disclaimer.
+  * English module exposes 9 entries with English disclaimer.
+  * Both locale modules export the same prompt names (drift fails CI).
+  * Body parity spot-check: `identificar_cn` references the same 5
+    tools in both languages.
+
 ## [0.2.8] — 2026-05-06
 
 ### Added
