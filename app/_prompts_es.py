@@ -596,6 +596,89 @@ medicamento a la fecha de la consulta".
 
 
 # ---------------------------------------------------------------------------
+# 10 · Hospital + farmacia + paciente — interacciones documentadas en FT 4.5
+# ---------------------------------------------------------------------------
+async def comprobar_interaccion_principios_activos(
+    principios_activos: list[str],
+) -> str:
+    """Comprueba si la sección 4.5 (Interacciones) de las fichas técnicas
+    AEMPS menciona interacciones cruzadas entre los principios activos
+    indicados.
+
+    Caso de uso: revisión preliminar de interacciones para una
+    combinación de fármacos. **NO sustituye una herramienta clínica
+    formal de detección de interacciones** (BOT PLUS, Lexicomp,
+    Stockley, Micromedex, etc.) — solo busca menciones textuales en la
+    documentación oficial AEMPS, lo que es un lower bound, no un
+    upper bound, de las interacciones potenciales.
+    """
+    if len(principios_activos) < 2:
+        return "Error: se necesitan al menos 2 principios activos para buscar interacciones."
+    if len(principios_activos) > 5:
+        return "Error: máximo 5 principios activos por consulta (límite de tokens)."
+    listado = ", ".join(f'"{p}"' for p in principios_activos)
+    n_pares = len(principios_activos) * (len(principios_activos) - 1) // 2
+    return f"""\
+Comprueba interacciones potenciales **documentadas en fichas técnicas
+AEMPS** entre los siguientes principios activos: {listado}.
+
+Pasos:
+
+1. Para cada principio activo, localiza un medicamento representativo
+   comercializado:
+   `buscar_medicamentos(practiv1="<principio>", comerc=1, pagina=1)`.
+   Toma el primer resultado y guarda su `nregistro` y `nombre`.
+
+2. Para cada pareja de principios activos (A, B), busca menciones
+   cruzadas en la sección 4.5 (Interacciones) de la ficha técnica:
+   `buscar_en_ficha_tecnica(reglas=[
+       {{"seccion": "4.5", "texto": "<principio_B>", "contiene": 1}}
+   ])`. Repite con A y B intercambiados (la mención puede estar solo
+   en una dirección).
+
+3. Para cada medicamento que aparezca como match: extrae el párrafo
+   relevante de la sección 4.5:
+   `doc_contenido(tipo_doc=1, nregistro="<nregistro>", seccion="4.5", format="txt")`.
+   Recorta a las 3-6 frases que mencionan el otro principio activo
+   (no copies la sección entera, suele ser muy larga).
+
+Devuelve la salida con esta estructura:
+
+### Resumen
+- Combinaciones revisadas: {n_pares}.
+- Interacciones documentadas en FT AEMPS: N.
+
+### Detalle por combinación
+Para cada par A↔B, una sub-sección:
+
+#### A ↔ B
+- ✅ "Sin menciones cruzadas en sección 4.5 de las fichas técnicas
+  consultadas" — si no hay nada.
+- ⚠️ Si hay menciones: para cada match, indica:
+  - Medicamento: nombre comercial · nregistro · laboratorio.
+  - Párrafo relevante (3-6 frases) de la sección 4.5.
+  - URL a la FT completa.
+
+### ⚠️ Limitaciones (CRÍTICO — incluir SIEMPRE)
+- Esta búsqueda solo cubre menciones textuales en la sección 4.5 de
+  la ficha técnica oficial AEMPS de **un medicamento representativo**
+  por principio activo. **NO sustituye** una herramienta clínica
+  formal de detección de interacciones (BOT PLUS / Bot Plus Web,
+  Lexicomp, Stockley's Drug Interactions, Micromedex, UpToDate
+  Lexicomp).
+- **Una ausencia de mención NO implica ausencia de interacción** —
+  significa solo que el medicamento concreto consultado no la
+  documenta en su FT. Otros medicamentos con el mismo principio
+  activo pueden documentarla.
+- Las interacciones farmacocinéticas / farmacodinámicas dependen de
+  dosis, vía, paciente, función renal/hepática, comorbilidad,
+  polifarmacia. **Siempre consulta a un farmacéutico clínico o
+  médico** antes de tomar decisiones de prescripción, sustitución o
+  desprescripción.
+{PATIENT_FACING_DISCLAIMER}"""
+
+
+# ---------------------------------------------------------------------------
 # Public API — register all prompts onto a FastMCP server instance
 # ---------------------------------------------------------------------------
 ALL_PROMPTS: tuple[tuple[str, str, PromptFn], ...] = (
@@ -679,5 +762,15 @@ ALL_PROMPTS: tuple[tuple[str, str, PromptFn], ...] = (
         "público general que quiere entender un medicamento sin pedirle "
         "al LLM que actúe como consultor clínico.",
         info_medicamento_para_no_sanitarios,
+    ),
+    (
+        "comprobar_interaccion_principios_activos",
+        "Comprueba si la sección 4.5 (Interacciones) de las fichas técnicas "
+        "AEMPS menciona interacciones cruzadas entre 2-5 principios activos. "
+        "Es una búsqueda textual sobre documentación oficial — NO sustituye "
+        "una herramienta clínica formal (BOT PLUS, Lexicomp, Stockley, "
+        "Micromedex). Caso de uso: revisión preliminar de polifarmacia en "
+        "farmacia hospitalaria, validación de combinaciones para protocolos.",
+        comprobar_interaccion_principios_activos,
     ),
 )

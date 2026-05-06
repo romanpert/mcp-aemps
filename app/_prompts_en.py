@@ -584,6 +584,84 @@ medicine as of the consultation date".
 
 
 # ---------------------------------------------------------------------------
+# 10 · Hospital + pharmacy + patient — interactions documented in SmPC 4.5
+# ---------------------------------------------------------------------------
+async def comprobar_interaccion_principios_activos(
+    principios_activos: list[str],
+) -> str:
+    """Check whether section 4.5 (Interactions) of AEMPS SmPCs mentions
+    cross-interactions between the given active substances.
+
+    Use case: preliminary interaction review for a drug combination.
+    **Does NOT replace a formal clinical interaction-checking tool**
+    (BOT PLUS, Lexicomp, Stockley, Micromedex, etc.) — it only searches
+    for textual mentions in the official AEMPS documentation, which is
+    a lower bound, not an upper bound, of potential interactions.
+    """
+    if len(principios_activos) < 2:
+        return "Error: at least 2 active substances are needed to search for interactions."
+    if len(principios_activos) > 5:
+        return "Error: maximum 5 active substances per query (token limit)."
+    listado = ", ".join(f'"{p}"' for p in principios_activos)
+    n_pares = len(principios_activos) * (len(principios_activos) - 1) // 2
+    return f"""\
+Check potential interactions **documented in AEMPS SmPCs** between the
+following active substances: {listado}.
+
+Steps:
+
+1. For each active substance, locate a representative marketed
+   medicine: `buscar_medicamentos(practiv1="<substance>", comerc=1, pagina=1)`.
+   Take the first result and store its `nregistro` and `nombre`.
+
+2. For each pair of active substances (A, B), search for cross-mentions
+   in section 4.5 (Interactions) of the SmPC:
+   `buscar_en_ficha_tecnica(reglas=[
+       {{"seccion": "4.5", "texto": "<substance_B>", "contiene": 1}}
+   ])`. Repeat with A and B swapped (the mention may be in only one
+   direction).
+
+3. For each medicine that comes back as a match: extract the relevant
+   paragraph from section 4.5:
+   `doc_contenido(tipo_doc=1, nregistro="<nregistro>", seccion="4.5", format="txt")`.
+   Trim to the 3-6 sentences that mention the other active substance
+   (do not copy the full section, it is usually very long).
+
+Return the output with this structure:
+
+### Summary
+- Combinations reviewed: {n_pares}.
+- Interactions documented in AEMPS SmPC: N.
+
+### Detail per combination
+For each pair A↔B, a sub-section:
+
+#### A ↔ B
+- ✅ "No cross-mentions in section 4.5 of the consulted SmPCs" — if
+  there is nothing.
+- ⚠️ If there are mentions: for each match, indicate:
+  - Medicine: brand name · nregistro · manufacturer.
+  - Relevant paragraph (3-6 sentences) from section 4.5.
+  - URL to the full SmPC.
+
+### ⚠️ Limitations (CRITICAL — always include)
+- This search only covers textual mentions in section 4.5 of the
+  official AEMPS SmPC of **one representative medicine** per active
+  substance. It **does NOT replace** a formal clinical
+  interaction-checking tool (BOT PLUS / Bot Plus Web, Lexicomp,
+  Stockley's Drug Interactions, Micromedex, UpToDate Lexicomp).
+- **Absence of mention does NOT imply absence of interaction** — it
+  only means the specific medicine consulted does not document it in
+  its SmPC. Other medicines with the same active substance may
+  document it.
+- Pharmacokinetic / pharmacodynamic interactions depend on dose,
+  route, patient, renal/hepatic function, comorbidity, polypharmacy.
+  **Always consult a clinical pharmacist or physician** before making
+  prescription, substitution or deprescription decisions.
+{PATIENT_FACING_DISCLAIMER}"""
+
+
+# ---------------------------------------------------------------------------
 # Public API — registered onto the FastMCP server by app.prompts.register_prompts
 # ---------------------------------------------------------------------------
 ALL_PROMPTS: tuple[tuple[str, str, PromptFn], ...] = (
@@ -668,5 +746,16 @@ ALL_PROMPTS: tuple[tuple[str, str, PromptFn], ...] = (
         "understand a medicine without asking the LLM to act as a "
         "clinical consultant.",
         info_medicamento_para_no_sanitarios,
+    ),
+    (
+        "comprobar_interaccion_principios_activos",
+        "Check whether section 4.5 (Interactions) of AEMPS SmPCs "
+        "mentions cross-interactions between 2-5 active substances. "
+        "It is a textual search over official documentation — does NOT "
+        "replace a formal clinical interaction-checking tool (BOT PLUS, "
+        "Lexicomp, Stockley, Micromedex). Use case: preliminary "
+        "polypharmacy review in hospital pharmacy, validation of "
+        "combinations for protocols.",
+        comprobar_interaccion_principios_activos,
     ),
 )

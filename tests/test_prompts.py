@@ -1,7 +1,7 @@
 """Tests for the curated MCP Prompt catalogue (app/prompts.py).
 
 Pins:
-* The exact set of 9 prompts is exposed (drift = explicit decision).
+* The exact set of 10 prompts is exposed (drift = explicit decision).
 * Required vs optional args match the function signature.
 * Each prompt body returns a non-empty user message that mentions at
   least one mcp-aemps tool by name (otherwise the prompt is just chat,
@@ -22,6 +22,7 @@ from app.prompts import (
     PATIENT_FACING_DISCLAIMER,
     auditar_cartera_laboratorio,
     comparar_fichas_tecnicas,
+    comprobar_interaccion_principios_activos,
     equivalencias_genericas,
     identificar_cn,
     info_medicamento_para_no_sanitarios,
@@ -42,6 +43,7 @@ EXPECTED_PROMPTS = {
     "informe_posicionamiento_terapeutico",
     "material_visual_paciente",
     "info_medicamento_para_no_sanitarios",
+    "comprobar_interaccion_principios_activos",
 }
 
 # Prompts that hand information to a non-clinician user must close with the
@@ -49,6 +51,7 @@ EXPECTED_PROMPTS = {
 PATIENT_FACING = {
     "info_medicamento_para_no_sanitarios",
     "material_visual_paciente",
+    "comprobar_interaccion_principios_activos",
 }
 
 
@@ -58,7 +61,7 @@ PATIENT_FACING = {
 
 
 def test_all_prompts_registered_on_stdio_server() -> None:
-    """The exact set of 9 prompts ships on the stdio MCP transport."""
+    """The exact set of 10 prompts ships on the stdio MCP transport."""
     server = build_server()
     prompts = asyncio.run(server.list_prompts())
     names = {p.name for p in prompts}
@@ -107,6 +110,7 @@ def test_required_args_per_prompt() -> None:
         "informe_posicionamiento_terapeutico": {"nregistro"},
         "material_visual_paciente": {"nregistro"},
         "info_medicamento_para_no_sanitarios": {"nombre_o_cn"},
+        "comprobar_interaccion_principios_activos": {"principios_activos"},
     }
     for name, required in expected.items():
         assert _required_args(name) == required, f"{name}: required args drift"
@@ -132,6 +136,11 @@ def test_required_args_per_prompt() -> None:
         (informe_posicionamiento_terapeutico, {"nregistro": "12345"}, "obtener_medicamento"),
         (material_visual_paciente, {"nregistro": "12345"}, "obtener_medicamento"),
         (info_medicamento_para_no_sanitarios, {"nombre_o_cn": "ibuprofeno"}, "buscar_medicamentos"),
+        (
+            comprobar_interaccion_principios_activos,
+            {"principios_activos": ["warfarina", "amiodarona"]},
+            "buscar_en_ficha_tecnica",
+        ),
     ],
 )
 def test_each_prompt_orchestrates_at_least_one_tool(fn, kwargs, must_mention_tool) -> None:
@@ -154,6 +163,10 @@ def test_each_prompt_orchestrates_at_least_one_tool(fn, kwargs, must_mention_too
     [
         (material_visual_paciente, {"nregistro": "12345"}),
         (info_medicamento_para_no_sanitarios, {"nombre_o_cn": "aspirina"}),
+        (
+            comprobar_interaccion_principios_activos,
+            {"principios_activos": ["warfarina", "amiodarona"]},
+        ),
     ],
 )
 def test_patient_facing_prompts_carry_the_disclaimer(fn, kwargs) -> None:
@@ -202,6 +215,31 @@ def test_comparar_fichas_tecnicas_rejects_too_many() -> None:
 def test_monitorizar_cambios_cartera_rejects_too_many() -> None:
     body = asyncio.run(monitorizar_cambios_cartera(nregistros=[str(i) for i in range(51)]))
     assert body.startswith("Error:"), ">50 nregistros must return explicit error"
+
+
+def test_comprobar_interaccion_rejects_too_few() -> None:
+    body = asyncio.run(comprobar_interaccion_principios_activos(principios_activos=["warfarina"]))
+    assert body.startswith("Error:"), "<2 active substances must return explicit error"
+
+
+def test_comprobar_interaccion_rejects_too_many() -> None:
+    body = asyncio.run(
+        comprobar_interaccion_principios_activos(principios_activos=["a", "b", "c", "d", "e", "f"])
+    )
+    assert body.startswith("Error:"), ">5 active substances must return explicit error"
+
+
+def test_comprobar_interaccion_warns_about_clinical_tools() -> None:
+    """The interactions prompt is safety-critical: it MUST surface that it
+    is NOT a substitute for a formal clinical interaction-checker."""
+    body = asyncio.run(
+        comprobar_interaccion_principios_activos(principios_activos=["warfarina", "amiodarona"])
+    )
+    # Expect the limitations block to mention at least one canonical clinical tool.
+    canonical_tools = ("BOT PLUS", "Lexicomp", "Stockley", "Micromedex")
+    assert any(t in body for t in canonical_tools), (
+        "interactions prompt must reference a formal clinical interaction-checking tool"
+    )
 
 
 def test_monitorizar_cambios_cartera_rejects_empty() -> None:

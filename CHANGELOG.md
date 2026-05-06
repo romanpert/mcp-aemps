@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.11] — 2026-05-06
+
+### Added
+- **OS-locale auto-detection** for `MCP_AEMPS_LOCALE`. When the env
+  var is unset, the server peeks at `$LC_ALL` / `$LANG` /
+  `$LANGUAGE` and picks `en` for English-tagged systems, `es` for
+  everything else (including the POSIX `C` locale and unrecognised
+  locales). An explicit `MCP_AEMPS_LOCALE=es|en` always wins over
+  the sniff. CIMA's source data is Spanish, so `es` is the safest
+  fallback when no signal is available.
+- **New curated MCP Prompt: `comprobar_interaccion_principios_activos`**
+  (10th in the catalogue). Checks whether section 4.5 (Interactions)
+  of AEMPS SmPCs mentions cross-interactions between 2-5 active
+  substances. First prompt to exercise `buscar_en_ficha_tecnica`
+  (the textual-search tool was orphan in the prompt catalogue).
+
+  **Safety-critical**: this is patient-facing AND it's an
+  interaction-checker, so the body explicitly states it is **NOT a
+  substitute** for a formal clinical interaction-checking tool (BOT
+  PLUS, Lexicomp, Stockley, Micromedex). A test
+  (`test_comprobar_interaccion_warns_about_clinical_tools`) pins
+  this — accidental removal of the warning breaks CI.
+
+- **README split** — primary README (`README.md`) is now in
+  **Spanish**, since AEMPS is the Spanish regulator and the data
+  source is Spanish. Full English translation in `README.en.md`.
+  Language selector at the top of both files cross-links them.
+  English README adds an explicit note: the i18n locale only
+  translates LLM-facing infrastructure (descriptions, prompts);
+  the **content** returned by CIMA stays Spanish (drug names,
+  technical sheets, leaflets — that's the official source-of-truth
+  language).
+
+### Tests
+- 127/127 passing (was 114). 13 new tests:
+  * 7 OS-locale auto-detect cases (LANG, LC_ALL, LANGUAGE
+    permutations + explicit `MCP_AEMPS_LOCALE` override).
+  * 6 covering the new interactions prompt: registration on
+    catalogue (10 expected names), required-args contract
+    (`principios_activos`), body orchestrates
+    `buscar_en_ficha_tecnica`, patient-facing disclaimer present,
+    edge cases (too-few / too-many active substances), and the
+    canonical-tool warning is present.
+
 ## [0.2.10] — 2026-05-06
 
 ### Validated (no behaviour change)

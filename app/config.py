@@ -9,6 +9,7 @@ and rate limiting and continues to work normally.
 
 from __future__ import annotations
 
+import os
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
@@ -27,6 +28,31 @@ def _resolve_version() -> str:
         return _pkg_version("mcp-aemps")
     except PackageNotFoundError:
         return "0.0.0+source"
+
+
+def _detect_default_locale() -> str:
+    """Sniff OS locale env vars and return ``"en"`` for English systems,
+    ``"es"`` for everything else. Falls back to ``"es"`` because CIMA's
+    native data language is Spanish — keeping the default localised to
+    the source-of-truth language is the right behaviour when no signal
+    is available.
+
+    This is only consulted when ``MCP_AEMPS_LOCALE`` is **not** set
+    explicitly — pydantic-settings' env var precedence means an explicit
+    value always wins over this default factory.
+    """
+    for var in ("LC_ALL", "LANG", "LANGUAGE"):
+        raw = os.environ.get(var, "")
+        if not raw:
+            continue
+        # Strip codeset (.UTF-8) and modifier (@euro), take the language tag.
+        primary = raw.split(".")[0].split("@")[0].split(":")[0]
+        lang = primary.split("_")[0].lower()
+        if lang.startswith("en"):
+            return "en"
+        if lang.startswith("es"):
+            return "es"
+    return "es"
 
 
 def _mkdir_private(path_str: str) -> str:
@@ -50,14 +76,13 @@ class Settings(BaseSettings):
     mcp_aemps_version: str = Field(default_factory=_resolve_version, description="Server version")
 
     # Locale for LLM-facing tool descriptions, system prompt, prompt
-    # descriptions and resource descriptions. Default Spanish (CIMA's
-    # native language); set to "en" for English. Body of the curated
-    # prompts in app/prompts.py stays Spanish — full translation tracked
-    # for v0.3 (the routing signal for the LLM is the *description*, not
-    # the body).
+    # descriptions / bodies and resource descriptions. CIMA's native
+    # language is Spanish; the default is therefore "es" unless the OS
+    # signals an English environment via $LC_ALL / $LANG / $LANGUAGE.
+    # An explicit MCP_AEMPS_LOCALE env var always wins over the sniff.
     mcp_aemps_locale: str = Field(
-        "es",
-        description='LLM-facing language: "es" (default) or "en".',
+        default_factory=_detect_default_locale,
+        description='LLM-facing language: "es" or "en". Auto-sniffed from $LANG/$LC_ALL when unset.',
     )
 
     # Optional OAuth 2.1 Resource-Server mode. When OFF (default), every

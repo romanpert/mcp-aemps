@@ -80,6 +80,48 @@ def test_invalid_locale_raises_validation_error() -> None:
         Settings(mcp_aemps_locale="fr")
 
 
+@pytest.mark.parametrize(
+    "env, expected",
+    [
+        ({}, "es"),  # nothing → es
+        ({"LANG": "en_US.UTF-8"}, "en"),  # English locale → en
+        ({"LANG": "es_ES.UTF-8"}, "es"),  # Spanish locale → es
+        ({"LC_ALL": "C"}, "es"),  # POSIX locale → no signal → es
+        ({"LANG": "fr_FR.UTF-8"}, "es"),  # French → es (CIMA is Spanish-source)
+        ({"LANGUAGE": "en"}, "en"),  # bare LANGUAGE → en
+        ({"LC_ALL": "en_GB.UTF-8", "LANG": "es_ES.UTF-8"}, "en"),  # LC_ALL beats LANG
+    ],
+)
+def test_locale_auto_detect_from_os_env(monkeypatch, env, expected) -> None:
+    """``MCP_AEMPS_LOCALE`` defaults to a sniff of $LC_ALL/$LANG/$LANGUAGE.
+    English-tagged systems get ``en``; everything else (including
+    unknown locales and the POSIX C locale) defaults to ``es`` because
+    CIMA's source data is Spanish."""
+    from app.config import Settings
+
+    monkeypatch.delenv("MCP_AEMPS_LOCALE", raising=False)
+    for var in ("LC_ALL", "LANG", "LANGUAGE"):
+        monkeypatch.delenv(var, raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+
+    s = Settings()
+    assert s.mcp_aemps_locale == expected, (
+        f"with env {env}, expected locale {expected!r}, got {s.mcp_aemps_locale!r}"
+    )
+
+
+def test_explicit_mcp_aemps_locale_beats_os_sniff(monkeypatch) -> None:
+    """An explicit MCP_AEMPS_LOCALE always wins over the OS sniff."""
+    from app.config import Settings
+
+    monkeypatch.setenv("LANG", "es_ES.UTF-8")
+    monkeypatch.setenv("MCP_AEMPS_LOCALE", "en")
+
+    s = Settings()
+    assert s.mcp_aemps_locale == "en"
+
+
 # ---------------------------------------------------------------------------
 # i18n prompt catalogue (added in v0.2.9)
 # ---------------------------------------------------------------------------
@@ -89,7 +131,7 @@ def test_es_prompts_module_has_9_entries_with_spanish_content() -> None:
     """Spanish prompt catalogue exposes 9 entries with Spanish content."""
     import app._prompts_es as es
 
-    assert len(es.ALL_PROMPTS) == 9
+    assert len(es.ALL_PROMPTS) == 10
     assert "Aviso legal" in es.PATIENT_FACING_DISCLAIMER
     assert "consulte a su médico" in es.PATIENT_FACING_DISCLAIMER
     _, desc, _ = es.ALL_PROMPTS[0]
@@ -100,7 +142,7 @@ def test_en_prompts_module_has_9_entries_with_english_content() -> None:
     """English prompt catalogue exposes 9 entries with English content."""
     import app._prompts_en as en
 
-    assert len(en.ALL_PROMPTS) == 9
+    assert len(en.ALL_PROMPTS) == 10
     assert "Legal notice" in en.PATIENT_FACING_DISCLAIMER
     assert "doctor or pharmacist" in en.PATIENT_FACING_DISCLAIMER
     _, desc, _ = en.ALL_PROMPTS[0]

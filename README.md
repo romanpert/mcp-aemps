@@ -5,8 +5,12 @@
 <h1 align="center">mcp-aemps</h1>
 
 <p align="center">
-  <strong>The first open-source, regulatory-compliant MCP server for the pharmaceutical industry.</strong><br/>
-  Real-time access to Spain's AEMPS/CIMA drug registry — 20,000+ authorised medicines, safety alerts, supply problems, clinical documents — as structured MCP tools for any AI assistant.
+  <strong>El primer servidor MCP open-source y regulatorio-compliant para la industria farmacéutica.</strong><br/>
+  Acceso en tiempo real al registro AEMPS/CIMA — más de 20.000 medicamentos autorizados en España, alertas de seguridad, problemas de suministro, fichas técnicas, prospectos — expuesto como herramientas MCP estructuradas para cualquier asistente de IA.
+</p>
+
+<p align="center">
+  🇪🇸 <strong>Español</strong> · <a href="README.en.md">🇬🇧 English</a>
 </p>
 
 <p align="center">
@@ -21,26 +25,26 @@
 
 ---
 
-## What it does
+## Qué hace
 
-`mcp-aemps` wraps the **AEMPS CIMA REST API** as a full MCP server. Connect Claude, GPT-4o, Gemini — or any MCP-compatible agent — to Spain's official pharmaceutical registry. Query drug authorisations, technical sheets, pharmacovigilance safety notes, supply problems, clinical equivalents, and more, in real time.
+`mcp-aemps` envuelve la **API REST CIMA de la AEMPS** como un servidor MCP completo. Conecta Claude, GPT-4o, Gemini — o cualquier agente compatible con MCP — al registro oficial de medicamentos español. Consulta autorizaciones, fichas técnicas, notas de farmacovigilancia, problemas de suministro, equivalentes clínicos y más, en tiempo real.
 
-**Data source:** [CIMA (AEMPS)](https://cima.aemps.es) — public API, no PII, no authentication required.  
-**Compliance posture:** Read-only proxy. Audit trail per request. No patient data processed.
+**Fuente de datos:** [CIMA (AEMPS)](https://cima.aemps.es) — API pública, sin PII, sin autenticación requerida.
+**Postura de compliance:** Proxy read-only. Audit trail por petición. Sin procesamiento de datos de pacientes.
 
 ---
 
-## Install
+## Instalación
 
 ```bash
 # pip
 pip install mcp-aemps
 
-# zero-install (recommended for CLI clients)
+# zero-install (recomendado para clientes CLI)
 uvx mcp-aemps up
 pipx run mcp-aemps up
 
-# Docker (multi-arch: linux/amd64, linux/arm64) — minimum 0.1.6
+# Docker (multi-arch: linux/amd64, linux/arm64) — mínimo 0.1.6
 docker run -p 8765:8765 ghcr.io/romanpert/mcp-aemps:latest
 
 # Docker Compose
@@ -49,173 +53,154 @@ docker compose up -d
 
 ---
 
-## One-command client setup
+## Configuración del cliente en un solo comando
 
-After `pip install mcp-aemps`, register the server with your MCP client in
-**one command** — no manual JSON editing.
+Tras `pip install mcp-aemps`, registra el servidor en tu cliente MCP con **un único comando** — sin editar JSON manualmente.
 
 ```bash
-# All detected clients at once
+# Todos los clientes detectados a la vez
 mcp-aemps install
 
-# Or pick one
-mcp-aemps install claude-desktop   # stdio default (uvx auto-launch); HTTP via mcp-remote optional
-mcp-aemps install claude-code      # uses `claude mcp add` if available
+# O elige uno
+mcp-aemps install claude-desktop   # stdio por defecto (uvx auto-launch); HTTP via mcp-remote opcional
+mcp-aemps install claude-code      # usa `claude mcp add` cuando está disponible
 mcp-aemps install codex
-mcp-aemps install vscode           # writes mcp.servers in user settings.json (Copilot Chat MCP)
-mcp-aemps install cursor           # writes ~/.cursor/mcp.json
-mcp-aemps install windsurf         # writes ~/.codeium/windsurf/mcp_config.json
-mcp-aemps install zed              # writes context_servers in Zed settings.json
-mcp-aemps install continue         # writes mcpServers in ~/.continue/config.yaml
-mcp-aemps install jetbrains        # writes ~/.junie/mcp.json (JetBrains Junie)
+mcp-aemps install vscode           # escribe mcp.servers en settings.json (Copilot Chat MCP)
+mcp-aemps install cursor           # escribe ~/.cursor/mcp.json
+mcp-aemps install windsurf         # escribe ~/.codeium/windsurf/mcp_config.json
+mcp-aemps install zed              # escribe context_servers en Zed settings.json
+mcp-aemps install continue         # escribe mcpServers en ~/.continue/config.yaml
+mcp-aemps install jetbrains        # escribe ~/.junie/mcp.json (JetBrains Junie)
 
-# Custom URL or server key
+# URL o nombre de servidor personalizado
 mcp-aemps install --url http://my-host:9000/mcp --name aemps
 ```
 
-To remove:
+Para desinstalar:
 
 ```bash
-mcp-aemps uninstall                  # remove from all
-mcp-aemps uninstall claude-desktop   # one client only
+mcp-aemps uninstall                  # quitar de todos
+mcp-aemps uninstall claude-desktop   # solo un cliente
 ```
 
-**Properties** — installers are *idempotent* (safe to re-run), *additive*
-(preserves your other entries), *atomic* (write succeeds fully or not at all),
-and *port-aware* (read the actual port `mcp-aemps up` bound to, so you can
-change ports without re-installing).
+**Propiedades** — los instaladores son *idempotentes* (se pueden re-ejecutar con seguridad), *aditivos* (preservan tus otras entradas), *atómicos* (la escritura se completa entera o no se aplica) y *port-aware* (leen el puerto real al que se ha bindeado `mcp-aemps up`, así que puedes cambiar de puerto sin re-instalar).
 
-**Per-OS config paths:**
+**Rutas de configuración por SO:**
 
-| Client | macOS | Windows | Linux |
+| Cliente | macOS | Windows | Linux |
 |---|---|---|---|
 | Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` | `%APPDATA%\Claude\claude_desktop_config.json` | `~/.config/Claude/claude_desktop_config.json` |
-| Claude Code | `claude mcp add` (preferred) → fallback `~/.claude.json` | same | same |
+| Claude Code | `claude mcp add` (preferido) → fallback `~/.claude.json` | igual | igual |
 | Codex | `~/.codex/config.toml` | `%USERPROFILE%\.codex\config.toml` | `~/.codex/config.toml` |
 | VS Code | `~/Library/Application Support/Code/User/settings.json` | `%APPDATA%\Code\User\settings.json` | `~/.config/Code/User/settings.json` |
-| Cursor | `~/.cursor/mcp.json` | same | same |
-| Windsurf | `~/.codeium/windsurf/mcp_config.json` | same | same |
+| Cursor | `~/.cursor/mcp.json` | igual | igual |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` | igual | igual |
 | Zed | `~/.config/zed/settings.json` | `%APPDATA%\Zed\settings.json` | `~/.config/zed/settings.json` |
-| Continue.dev | `~/.continue/config.yaml` | same | same |
-| JetBrains Junie | `~/.junie/mcp.json` | same | same |
+| Continue.dev | `~/.continue/config.yaml` | igual | igual |
+| JetBrains Junie | `~/.junie/mcp.json` | igual | igual |
 
-After install, **start the server** (default port: **`8765`** — chosen to avoid
-collisions with the very common `8000`/`5000`/`3000`):
+Tras instalar, **arranca el servidor** (puerto por defecto: **`8765`** — elegido para evitar colisiones con los típicos `8000`/`5000`/`3000`):
 
 ```bash
 mcp-aemps up           # foreground
 mcp-aemps up --daemon  # background
-mcp-aemps up --port 9000  # explicit port; auto-fallback enabled by default
+mcp-aemps up --port 9000  # puerto explícito; auto-fallback habilitado por defecto
 ```
 
-Then restart your client. `mcp-aemps` appears as an available MCP server.
+Después reinicia tu cliente. `mcp-aemps` aparece como un servidor MCP disponible.
 
 ---
 
-## MCP Tools — Official CIMA Endpoints
+## Herramientas MCP — Endpoints oficiales CIMA
 
-All tools map 1:1 to officially documented CIMA REST API endpoints.
+Todas las herramientas mapean 1:1 a endpoints REST CIMA oficialmente documentados.
 
-| Tool | CIMA Endpoint | Description |
+| Herramienta | Endpoint CIMA | Descripción |
 |------|--------------|-------------|
-| `obtener_medicamento` | `GET /medicamento` | Full drug record by CN or nregistro |
-| `buscar_medicamentos` | `GET /medicamentos` | Filtered/paginated drug search (20+ filters) |
-| `buscar_en_ficha_tecnica` | `POST /buscarEnFichaTecnica` | Full-text search inside technical sheets |
-| `listar_presentaciones` | `GET /presentaciones` | Presentations list with filters |
-| `obtener_presentacion` | `GET /presentacion/:cn` | Presentation detail by National Code |
-| `buscar_vmpp` | `GET /vmpp` | Clinical equivalents (VMP/VMPP) |
-| `consultar_maestras` | `GET /maestras` | Master catalogs: ATC, active ingredients, forms, labs |
-| `registro_cambios` | `GET|POST /registroCambios` | Authorization/withdrawal/modification history |
-| `problemas_suministro` | `GET /psuministro` + `GET /psuministro/v2/cn/:cn` | Supply problems — global listing or per National Code |
-| `problemas_suministro_dcp` | `GET /psuministro/v2/dcp/:dcp` | Supply problems by DCP (clinical product description) |
-| `problemas_suministro_dcpf` | `GET /psuministro/v2/dcpf/:dcpf` | Supply problems by DCPF (with pharmaceutical form) |
-| `listar_notas` / `obtener_notas` | `GET /notas/:nregistro` | Safety notes |
-| `listar_materiales` / `obtener_materiales` | `GET /materiales/:nregistro` | Safety informational materials |
-| `doc_secciones` | `GET /docSegmentado/secciones/:tipo` | Technical sheet / leaflet section metadata |
-| `doc_contenido` | `GET /docSegmentado/contenido/:tipo` | Section content (JSON / HTML / plain text) |
-| `html_ficha_tecnica` | `GET /dochtml/ft/:nregistro/:file` | Full technical sheet HTML |
-| `html_prospecto` | `GET /dochtml/p/:nregistro/:file` | Full patient leaflet HTML |
+| `obtener_medicamento` | `GET /medicamento` | Ficha completa por CN o nregistro |
+| `buscar_medicamentos` | `GET /medicamentos` | Búsqueda paginada con 20+ filtros |
+| `buscar_en_ficha_tecnica` | `POST /buscarEnFichaTecnica` | Búsqueda full-text dentro de fichas técnicas |
+| `listar_presentaciones` | `GET /presentaciones` | Listado de presentaciones con filtros |
+| `obtener_presentacion` | `GET /presentacion/:cn` | Detalle de presentación por Código Nacional |
+| `buscar_vmpp` | `GET /vmpp` | Equivalentes clínicos (VMP/VMPP) |
+| `consultar_maestras` | `GET /maestras` | Catálogos maestros: ATC, principios activos, formas, laboratorios |
+| `registro_cambios` | `GET\|POST /registroCambios` | Histórico de altas / bajas / modificaciones |
+| `problemas_suministro` | `GET /psuministro` + `GET /psuministro/v2/cn/:cn` | Problemas de suministro — listado global o por Código Nacional |
+| `problemas_suministro_dcp` | `GET /psuministro/v2/dcp/:dcp` | Problemas de suministro por DCP (descripción clínica) |
+| `problemas_suministro_dcpf` | `GET /psuministro/v2/dcpf/:dcpf` | Problemas de suministro por DCPF (con forma farmacéutica) |
+| `listar_notas` / `obtener_notas` | `GET /notas/:nregistro` | Notas de seguridad |
+| `listar_materiales` / `obtener_materiales` | `GET /materiales/:nregistro` | Materiales informativos de seguridad |
+| `doc_secciones` | `GET /docSegmentado/secciones/:tipo` | Metadatos de secciones de FT / prospecto |
+| `doc_contenido` | `GET /docSegmentado/contenido/:tipo` | Contenido de sección (JSON / HTML / texto plano) |
+| `html_ficha_tecnica` | `GET /dochtml/ft/:nregistro/:file` | HTML completo de la ficha técnica |
+| `html_prospecto` | `GET /dochtml/p/:nregistro/:file` | HTML completo del prospecto |
 
-Supply problems implement **dual-channel resolution**: v2 per-CN (enriched: authorization status, comercialisation flag) with automatic fallback to v1 for compatibility.
-
----
-
-## Data Lifecycle
-
-- **No local files required.** All data fetched from CIMA API on demand.
-- **Redis cache** (optional): startup warm-up for master catalogs (maestras), automatic 24h refresh — no app restart needed.
-- **CN → nregistro resolution** via `GET /presentacion/:cn` (always current, no stale local data).
-- Falls back gracefully to in-memory cache when Redis is unavailable.
+Los problemas de suministro implementan **resolución dual-channel**: v2 por CN (enriquecida: estado de autorización, flag de comercialización) con fallback automático a v1 por compatibilidad.
 
 ---
 
-## Configuration
+## Ciclo de vida de los datos
 
-All settings via environment variables:
+- **Sin ficheros locales requeridos.** Todos los datos se obtienen de la API CIMA bajo demanda.
+- **Cache Redis** (opcional): warm-up de catálogos maestros al arranque, refresco automático cada 24h sin reiniciar la aplicación.
+- **Resolución CN → nregistro** vía `GET /presentacion/:cn` (siempre actual, sin datos locales obsoletos).
+- Fallback elegante a cache en memoria cuando Redis no está disponible.
 
-| Variable | Default | Description |
+---
+
+## Configuración
+
+Todas las opciones se configuran vía variables de entorno:
+
+| Variable | Default | Descripción |
 |----------|---------|-------------|
-| `PORT` | `8765` | Server port (`mcp-aemps up --auto-port` finds free if busy) |
-| `REDIS_URL` | — | Redis or Valkey connection (optional, enables distributed cache + rate limit) |
-| `ALLOWED_ORIGINS` | `http://localhost:3000` | CORS origins (do not use `*` in production) |
-| `METRICS_KEY` | — | If set, `/internal/metrics` requires the `X-Metrics-Key` header. Recommended in production. |
-| `LOG_LEVEL` | `INFO` | Logging level |
-| `LOG_RETENTION_DAYS` | `90` | Daily-rotated gzipped log retention |
-| `MAX_RESULTS` | `30` | Max items per page returned by list endpoints |
+| `PORT` | `8765` | Puerto del servidor (`mcp-aemps up --auto-port` busca uno libre si está ocupado) |
+| `REDIS_URL` | — | Conexión a Redis o Valkey (opcional, habilita cache + rate-limit distribuidos) |
+| `ALLOWED_ORIGINS` | `http://localhost:3000` | Orígenes CORS (no usar `*` en producción) |
+| `METRICS_KEY` | — | Si se establece, `/internal/metrics` requiere la cabecera `X-Metrics-Key`. Recomendado en producción. |
+| `LOG_LEVEL` | `INFO` | Nivel de logging |
+| `LOG_RETENTION_DAYS` | `90` | Retención de logs rotados diariamente + gzipped |
+| `MAX_RESULTS` | `30` | Máximo de items por página en endpoints de listado |
+| `MCP_AEMPS_LOCALE` | auto | Idioma de strings LLM-facing: `es` o `en`. Auto-detectado de `$LANG`/`$LC_ALL` si no se establece (default `es`). |
+| `OAUTH_ENABLED` | `false` | Activa modo OAuth 2.1 Resource-Server. Ver sección OAuth. |
 
 ---
 
-## Observability
+## Observabilidad
 
-Ships with **lightweight in-process observability** — no external collector
-required:
+Incluye **observabilidad in-process ligera** — sin requerir collector externo:
 
-- **Liveness** at `/health/live` — process is alive (always 200 if the
-  event loop responds).
-- **Readiness** at `/health/ready` — cache backend reachable AND maestras
-  warmup completed (returns 503 during startup). Wire this into
-  Kubernetes `readinessProbe`.
-- **Combined snapshot** at `/health` — `{status, version, cache}` JSON
-  (kept for backwards compatibility).
-- **In-process metrics** at `/internal/metrics` — `{requests_total,
-  requests_by_path, status_codes, errors_5xx, uptime_seconds}` JSON.
-  Set `METRICS_KEY` to require the `X-Metrics-Key` header.
-- **Structured stdlib logging** with daily rotation + gzip retention
+- **Liveness** en `/health/live` — proceso vivo (siempre 200 si el event loop responde).
+- **Readiness** en `/health/ready` — backend de cache alcanzable Y warmup de maestras completado (devuelve 503 durante el arranque). Conectar a `readinessProbe` de Kubernetes.
+- **Snapshot combinado** en `/health` — JSON `{status, version, cache}` (mantenido por compatibilidad).
+- **Métricas in-process** en `/internal/metrics` — JSON `{requests_total, requests_by_path, status_codes, errors_5xx, uptime_seconds}`. Establece `METRICS_KEY` para requerir la cabecera `X-Metrics-Key`.
+- **Logging estructurado stdlib** con rotación diaria + retención gzip.
 
-For OpenTelemetry tracing or Prometheus exposition, replace the metrics
-middleware via the factory's `extra_middleware` / `startup_hooks` extension
-points (see `app/factory.py`).
+Para tracing OpenTelemetry o exposición Prometheus, reemplaza el middleware de métricas vía los puntos de extensión `extra_middleware` / `startup_hooks` del factory (ver `app/factory.py`).
 
 ---
 
-## Language (i18n)
+## Idioma (i18n)
 
-LLM-facing strings (tool descriptions, system prompt, `system_info`
-description) ship in **Spanish (default)** and **English**. Switch with
-the `MCP_AEMPS_LOCALE` env var:
+Las strings LLM-facing (descripciones de tools, system prompt, descripciones y bodies de prompts) se entregan en **español (default)** e **inglés**. Cambia con la variable `MCP_AEMPS_LOCALE`:
 
 ```bash
-# Default — no env var needed
+# Default — auto-detectado del SO; sin variable → es
 uvx mcp-aemps stdio
 
-# English
+# Inglés explícito (siempre gana sobre el sniff del SO)
 MCP_AEMPS_LOCALE=en uvx mcp-aemps stdio
 ```
 
-> Since v0.2.9 the **full** prompt catalogue (descriptions + bodies +
-> patient-facing disclaimer) ships in both locales. Both locales
-> register the same 9 prompt names with the same arg signatures —
-> clients hard-coding prompt names keep working when you flip the
-> locale.
+Desde v0.2.11, **se auto-detecta el idioma del sistema operativo** (`$LC_ALL` / `$LANG` / `$LANGUAGE`): sistemas en inglés reciben `en`, todo lo demás (incluyendo locale POSIX `C` y locales no reconocidos) cae a `es` porque la fuente de datos CIMA es española. Una `MCP_AEMPS_LOCALE` explícita siempre gana sobre la auto-detección.
+
+Desde v0.2.9 el catálogo **completo** de prompts (descripciones + bodies + disclaimer dirigido a pacientes) se entrega en ambos idiomas. Ambos locales registran los mismos 10 nombres de prompt con las mismas signaturas — los clientes que hardcodean nombres siguen funcionando al cambiar de idioma.
 
 ---
 
 ## OAuth 2.1 (opt-in)
 
-mcp-aemps is **public by default** because CIMA itself is public. For
-multi-tenant SaaS deployments or any setup where you need to gate
-access, the server can be flipped into **OAuth 2.1 Resource-Server**
-mode with five env vars:
+mcp-aemps es **público por defecto** porque CIMA es público. Para despliegues SaaS multi-tenant o cualquier setup donde necesites gating de acceso, el servidor se puede activar en modo **OAuth 2.1 Resource-Server** con cinco variables de entorno:
 
 ```bash
 export OAUTH_ENABLED=true
@@ -225,54 +210,40 @@ export OAUTH_AUDIENCE=https://mcp-aemps.example.com/mcp
 export OAUTH_REQUIRED_SCOPES=mcp:read
 ```
 
-When enabled:
+Cuando está habilitado:
 
-* Every MCP tool call over HTTP at `/mcp` requires a valid Bearer JWT
-  signed by the configured Authorization Server.
-* The PRM document is published at
-  `/.well-known/oauth-protected-resource` (RFC 9728), so any
-  spec-compliant MCP client can discover the AS via Dynamic Client
-  Registration (RFC 7591).
-* stdio is unaffected — process-local access is gated by OS
-  permissions, not by OAuth.
+* Cada llamada a tool MCP sobre HTTP en `/mcp` requiere un JWT Bearer válido firmado por el Authorization Server configurado.
+* El documento PRM se publica en `/.well-known/oauth-protected-resource` (RFC 9728), de modo que cualquier cliente MCP spec-compliant puede descubrir el AS vía Dynamic Client Registration (RFC 7591).
+* stdio no se ve afectado — el acceso process-local se controla por permisos de SO, no por OAuth.
 
-**No embedded Authorization Server.** Point `OAUTH_ISSUER` at any
-existing IdP — Auth0, Stytch, Cloudflare Workers OAuth Provider, Hydra,
-Keycloak, etc. mcp-aemps stays stateless: it verifies tokens, never
-issues them.
+**Sin Authorization Server embebido.** Apunta `OAUTH_ISSUER` a cualquier IdP existente — Auth0, Stytch, Cloudflare Workers OAuth Provider, Hydra, Keycloak, etc. mcp-aemps es stateless: verifica tokens, nunca los emite.
+
+Validado end-to-end en v0.2.10: POST `/mcp` sin token devuelve 401 con cabecera `WWW-Authenticate: Bearer error="invalid_token", resource_metadata="<URL del PRM>"` (RFC 6750 §3 + RFC 9728).
 
 ---
 
-## Tool Annotations
+## Anotaciones de Tools
 
-Every CIMA tool ships with the [MCP tool annotations](https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations/)
-that compliant clients (Claude Desktop, ChatGPT Dev Mode, Cursor, Continue,
-Zed, JetBrains Junie, …) use to drive their auto-approve UI:
+Cada herramienta CIMA se entrega con las [anotaciones MCP](https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations/) que los clientes spec-compliant (Claude Desktop, ChatGPT Dev Mode, Cursor, Continue, Zed, JetBrains Junie, …) usan para su UI de auto-aprobación:
 
-| Hint              | Value | Reason                                                      |
+| Hint              | Valor | Razón                                                       |
 |-------------------|-------|-------------------------------------------------------------|
-| `readOnlyHint`    | true  | The server is a thin proxy — no writes upstream.            |
-| `destructiveHint` | false | No environment mutations, ever.                             |
-| `idempotentHint`  | true  | Same args at the same instant return the same payload.      |
-| `openWorldHint`   | true  | Tools hit the external CIMA HTTP API.                       |
+| `readOnlyHint`    | true  | El servidor es un proxy fino — no hay escrituras upstream.  |
+| `destructiveHint` | false | Sin mutaciones del entorno, nunca.                          |
+| `idempotentHint`  | true  | Mismos args en el mismo instante → mismo payload.           |
+| `openWorldHint`   | true  | Las tools golpean la API HTTP externa de CIMA.              |
 
-This means clients that respect the spec will not prompt for confirmation
-on every CIMA query — they only gate calls where the annotations actually
-warrant caution. For Claude Code specifically, see the next section to
-build your own confirmation gates regardless of annotation hints.
+Esto hace que los clientes que respetan la spec no pidan confirmación en cada query CIMA — solo gatean llamadas donde las anotaciones lo justifican. Para Claude Code en concreto, ver más abajo cómo construir tus propias confirmation gates independientemente de las anotaciones.
 
 ---
 
-## Curated MCP Resources
+## Recursos MCP curados
 
-mcp-aemps exposes **5 static resources + 6 templates** under the
-`cima://` URI scheme. Resources are read-only URIs that MCP clients can
-**stream** and **cache** without paying the token cost of a tool call —
-the dominant token waste on interactive sessions.
+mcp-aemps expone **5 recursos estáticos + 6 templates** bajo el esquema URI `cima://`. Los recursos son URIs read-only que los clientes MCP pueden **streamear** y **cachear** sin pagar el coste en tokens de una llamada a tool — la fuente dominante de gasto de tokens en sesiones interactivas.
 
-### Static resources (auto-discoverable in `resources/list`)
+### Recursos estáticos (auto-descubribles vía `resources/list`)
 
-| URI | MIME | Content |
+| URI | MIME | Contenido |
 |---|---|---|
 | `cima://maestras/atc` | `application/json` | Árbol completo de códigos ATC |
 | `cima://maestras/principios-activos` | `application/json` | Listado completo de principios activos |
@@ -282,7 +253,7 @@ the dominant token waste on interactive sessions.
 
 ### Templates (`resources/templates/list`)
 
-| URI template | Content |
+| URI template | Contenido |
 |---|---|
 | `cima://maestras/atc/{codigo}` | Lookup ATC por código (p.ej. C09AA02 → Enalapril) |
 | `cima://maestras/principios-activos/{id}` | Lookup principio activo por id AEMPS |
@@ -291,27 +262,17 @@ the dominant token waste on interactive sessions.
 | `cima://docs/prospecto/{nregistro}` | HTML completo del prospecto |
 | `cima://docs/prospecto/{nregistro}/{seccion}` | Sección concreta del prospecto (1, 2, 3, 4, 5, 6) |
 
-Disponible en **ambos transportes** (stdio y `/mcp` HTTP) — desde v0.2.7
-existe un único `FastMCP` server que sirve tools, prompts y resources
-para los dos lados.
+Disponibles en **ambos transportes** (stdio y `/mcp` HTTP) — desde v0.2.7 existe un único `FastMCP` server que sirve tools, prompts y resources para los dos lados.
 
 ---
 
-## Curated MCP Prompts
+## Prompts MCP curados
 
-mcp-aemps ships **9 curated [MCP Prompts](https://modelcontextprotocol.io/specification/server/prompts)** —
-server-defined workflow templates you invoke explicitly from your MCP
-client (Claude Desktop, Continue, Cursor, Zed, …). They orchestrate the
-right CIMA tool calls for the most common professional and patient
-workflows, so you don't have to remember which tools to chain.
+mcp-aemps entrega **10 [Prompts MCP](https://modelcontextprotocol.io/specification/server/prompts)** curados — plantillas de workflow definidas en el servidor que invocas explícitamente desde tu cliente MCP (Claude Desktop, Continue, Cursor, Zed, …). Orquestan las llamadas correctas a tools CIMA para los workflows profesionales y de paciente más comunes, así no tienes que recordar qué tools encadenar.
 
-> **Transport availability**: Prompts ship on **both** transports —
-> stdio (`uvx mcp-aemps stdio`) and Streamable HTTP at `/mcp`. Since
-> v0.2.7 the HTTP transport uses FastMCP's native Streamable-HTTP app
-> (no fastapi-mcp indirection), so tools, prompts, resources and
-> annotations are all served from the same FastMCP instance.
+> **Disponibilidad en transportes**: los prompts se entregan en **ambos** transportes — stdio (`uvx mcp-aemps stdio`) y Streamable HTTP en `/mcp`. Desde v0.2.7 el transporte HTTP usa la app Streamable-HTTP nativa de FastMCP (sin indirección de fastapi-mcp), de modo que tools, prompts, resources y annotations se sirven todos desde la misma instancia FastMCP.
 
-### Catalogue
+### Catálogo
 
 | Prompt | Args | Caso de uso |
 |---|---|---|
@@ -324,12 +285,11 @@ workflows, so you don't have to remember which tools to chain.
 | **`informe_posicionamiento_terapeutico`** | `nregistro` | **Hospital + industria** — recupera el Informe Público de Evaluación (IPE/IPT) de AEMPS junto con la indicación autorizada (FT 4.1) y el mecanismo de acción (FT 5.1). Marca explícitamente cuando AEMPS no ha publicado IPT. |
 | **`material_visual_paciente`** | `nregistro` | **Counseling al paciente** — fotos de la caja y de la pastilla, vídeos de uso (inhaladores, plumas de insulina, autoinyectores), material informativo segregado por audiencia. Cierra con disclaimer. |
 | **`info_medicamento_para_no_sanitarios`** | `nombre_o_cn` | **Público general** — resumen llano sin jerga: qué es, para qué se usa, cómo es (fotos), alertas activas, dónde leer más. Cierra con disclaimer obligatorio "no es consejo médico". |
+| **`comprobar_interaccion_principios_activos`** | `principios_activos[]` | **Farmacia hospitalaria + industria** — comprueba si la sección 4.5 (Interacciones) de las fichas técnicas AEMPS menciona interacciones cruzadas entre 2-5 principios activos. Búsqueda textual sobre documentación oficial; **NO sustituye una herramienta clínica formal** (BOT PLUS, Lexicomp, Stockley, Micromedex). |
 
 ### Cómo se invoca
 
-En Claude Desktop (cuando el cliente lo soporta), aparecen como
-slash-commands `/mcp__mcp-aemps__<nombre>` en el menú de prompts, o se
-pueden listar via `prompts/list` desde cualquier cliente MCP-compliant.
+En Claude Desktop (cuando el cliente lo soporta), aparecen como slash-commands `/mcp__mcp-aemps__<nombre>` en el menú de prompts, o se pueden listar via `prompts/list` desde cualquier cliente MCP-compliant.
 
 Ejemplo programático con el SDK MCP de Python:
 
@@ -351,34 +311,19 @@ async with stdio_client(params) as (read, write):
 
 ### Diseño
 
-Cada prompt instruye al LLM **qué herramientas llamar, en qué orden y
-cómo formatear la salida**. Aprovechan la riqueza del payload de
-`obtener_medicamento` (que incluye `docs[]` con Ficha Técnica,
-Prospecto, Informe Público de Evaluación y Plan de Gestión de Riesgos;
-`fotos[]` con la caja y la forma farmacéutica; el flag `materialesInf`
-para vídeos vía `obtener_materiales`) en lugar de tratar CIMA como un
-simple lookup de campos.
+Cada prompt instruye al LLM **qué herramientas llamar, en qué orden y cómo formatear la salida**. Aprovechan la riqueza del payload de `obtener_medicamento` (que incluye `docs[]` con Ficha Técnica, Prospecto, Informe Público de Evaluación y Plan de Gestión de Riesgos; `fotos[]` con la caja y la forma farmacéutica; el flag `materialesInf` para vídeos vía `obtener_materiales`) en lugar de tratar CIMA como un simple lookup de campos.
 
-Los prompts **dirigidos a pacientes** (`material_visual_paciente`,
-`info_medicamento_para_no_sanitarios`) cierran siempre con un
-disclaimer explícito "no es consejo médico — consulte a su médico o
-farmacéutico". Está cubierto por test (`tests/test_prompts.py`); su
-eliminación accidental rompe CI.
+Los prompts **dirigidos a pacientes** (`material_visual_paciente`, `info_medicamento_para_no_sanitarios`, `comprobar_interaccion_principios_activos`) cierran siempre con un disclaimer explícito "no es consejo médico — consulte a su médico o farmacéutico". Está cubierto por test (`tests/test_prompts.py`); su eliminación accidental rompe CI.
 
 ---
 
-## Integrating with Claude Code hooks
+## Integración con Claude Code hooks
 
-Claude Code's [hooks system](https://docs.anthropic.com/claude-code/hooks)
-fires shell commands client-side around every tool invocation, including
-calls to MCP servers like mcp-aemps. The matcher `mcp__mcp-aemps__*`
-catches every tool exposed by this server. Three concrete recipes to drop
-into `~/.claude/settings.json`:
+El [sistema de hooks de Claude Code](https://docs.anthropic.com/claude-code/hooks) ejecuta comandos shell client-side alrededor de cada invocación de tool, incluyendo llamadas a servidores MCP como mcp-aemps. El matcher `mcp__mcp-aemps__*` captura cada herramienta expuesta por este servidor. Tres recetas concretas para añadir a `~/.claude/settings.json`:
 
-### 1 · Audit every mcp-aemps call to a JSONL log
+### 1 · Auditar cada llamada mcp-aemps a un log JSONL
 
-Useful for GMP Annex 11 / EMA GVP audit trails — full record of which
-tool was invoked with which arguments, when, by which session.
+Útil para audit trails GMP Annex 11 / EMA GVP — registro completo de qué tool se invocó con qué argumentos, cuándo, en qué sesión.
 
 ```json
 {
@@ -398,15 +343,11 @@ tool was invoked with which arguments, when, by which session.
 }
 ```
 
-The hook receives the tool call as JSON on stdin; `jq` flattens it to
-one line per call. Rotate `~/.claude/audit/` with `logrotate` or your
-SIEM agent.
+El hook recibe la llamada de tool como JSON por stdin; `jq` la aplana a una línea por llamada. Rota `~/.claude/audit/` con `logrotate` o tu agente SIEM.
 
-### 2 · Gate image downloads behind explicit confirmation
+### 2 · Gatear descargas de imágenes tras confirmación explícita
 
-`descargar_imagenes` returns base64-encoded medication images that can
-be large and bandwidth-expensive. Block the call unless the user has
-opted in via an env-var flag.
+`descargar_imagenes` devuelve imágenes de medicamentos codificadas en base64 que pueden ser grandes y costosas en ancho de banda. Bloquea la llamada salvo que el usuario haya optado in vía un flag de env-var.
 
 ```json
 {
@@ -426,13 +367,11 @@ opted in via an env-var flag.
 }
 ```
 
-Exit code `2` aborts the tool call and returns the stderr message to the
-model — Claude Code surfaces it as a denied tool with reason.
+El exit code `2` aborta la llamada al tool y devuelve el mensaje stderr al modelo — Claude Code lo expone como un tool denied con razón.
 
-### 3 · Ship per-tool latency to a SIEM
+### 3 · Enviar latencia por tool a un SIEM
 
-Pair `PreToolUse` (timer start) with `PostToolUse` (timer stop) and POST
-the delta plus tool name to your SIEM ingestion endpoint.
+Empareja `PreToolUse` (start del timer) con `PostToolUse` (stop del timer) y haz POST del delta más el nombre de tool a tu endpoint de ingest del SIEM.
 
 ```json
 {
@@ -460,34 +399,30 @@ the delta plus tool name to your SIEM ingestion endpoint.
 }
 ```
 
-> **Server-side equivalent.** mcp-aemps also exposes `pre_tool_hooks` /
-> `post_tool_hooks` on `create_app(...)` so the same audit trail can be
-> emitted server-side regardless of which MCP client is connected
-> (useful for shared deployments where you can't rely on every user
-> having the right `~/.claude/settings.json`). See `app/tool_hooks.py`.
+> **Equivalente server-side.** mcp-aemps también expone `pre_tool_hooks` / `post_tool_hooks` en `create_app(...)` de modo que el mismo audit trail puede emitirse server-side independientemente del cliente MCP que se conecte (útil para despliegues compartidos donde no puedes confiar en que cada usuario tenga el `~/.claude/settings.json` correcto). Ver `app/tool_hooks.py`.
 
 ---
 
-## Security
+## Seguridad
 
-- Non-root Docker user (UID 10001)
-- Security headers: `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`
-- `pyjwt[crypto]` — no `python-jose` (CVE-2024-33663)
-- No secrets in repo — all config via env vars
-- CORS configurable, not `*` in production
+- Usuario Docker non-root (UID 10001)
+- Cabeceras de seguridad: `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`
+- `pyjwt[crypto]` — sin `python-jose` (CVE-2024-33663)
+- Sin secretos en repo — toda configuración via env vars
+- CORS configurable, no `*` en producción
 
 ---
 
-## Reference Documentation
+## Documentación de referencia
 
-Official AEMPS source documents in [`docs/`](docs/):
+Documentos AEMPS oficiales en [`docs/`](docs/):
 
 - [`CIMA_REST_API.pdf`](docs/CIMA_REST_API.pdf) — CIMA REST API v1.23
-- [`CIMA-problemas-suministro.pdf`](docs/CIMA-problemas-suministro.pdf) — Supply Problems API (AEMPS/Ministerio de Sanidad)
+- [`CIMA-problemas-suministro.pdf`](docs/CIMA-problemas-suministro.pdf) — API de Problemas de Suministro (AEMPS / Ministerio de Sanidad)
 
 ---
 
-## License
+## Licencia
 
 Apache-2.0 © [Román Pérez Dumpert](https://github.com/romanpert)
 
