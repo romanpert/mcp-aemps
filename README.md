@@ -188,6 +188,60 @@ points (see `app/factory.py`).
 
 ---
 
+## Language (i18n)
+
+LLM-facing strings (tool descriptions, system prompt, `system_info`
+description) ship in **Spanish (default)** and **English**. Switch with
+the `MCP_AEMPS_LOCALE` env var:
+
+```bash
+# Default — no env var needed
+uvx mcp-aemps stdio
+
+# English
+MCP_AEMPS_LOCALE=en uvx mcp-aemps stdio
+```
+
+> The bodies of the curated MCP prompts in `app/prompts.py` stay in
+> Spanish for now — the routing signal for the LLM is the
+> *description*, which is translated. Full prompt body translation is
+> tracked for v0.3.
+
+---
+
+## OAuth 2.1 (opt-in)
+
+mcp-aemps is **public by default** because CIMA itself is public. For
+multi-tenant SaaS deployments or any setup where you need to gate
+access, the server can be flipped into **OAuth 2.1 Resource-Server**
+mode with five env vars:
+
+```bash
+export OAUTH_ENABLED=true
+export OAUTH_ISSUER=https://auth.example.com
+export OAUTH_JWKS_URL=https://auth.example.com/.well-known/jwks.json
+export OAUTH_AUDIENCE=https://mcp-aemps.example.com/mcp
+export OAUTH_REQUIRED_SCOPES=mcp:read
+```
+
+When enabled:
+
+* Every MCP tool call over HTTP at `/mcp` requires a valid Bearer JWT
+  signed by the configured Authorization Server.
+* The PRM document is published at
+  `/.well-known/oauth-protected-resource` (RFC 9728), so any
+  spec-compliant MCP client can discover the AS via Dynamic Client
+  Registration (RFC 7591).
+* stdio is unaffected — process-local access is gated by OS
+  permissions, not by OAuth.
+
+**No embedded Authorization Server.** Point `OAUTH_ISSUER` at any
+existing IdP — Auth0, Stytch, Cloudflare Workers OAuth Provider, Hydra,
+Keycloak, etc. mcp-aemps stays stateless: it verifies tokens, never
+issues them.
+
+---
+
 ## Tool Annotations
 
 Every CIMA tool ships with the [MCP tool annotations](https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations/)

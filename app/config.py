@@ -49,6 +49,39 @@ class Settings(BaseSettings):
 
     mcp_aemps_version: str = Field(default_factory=_resolve_version, description="Server version")
 
+    # Locale for LLM-facing tool descriptions, system prompt, prompt
+    # descriptions and resource descriptions. Default Spanish (CIMA's
+    # native language); set to "en" for English. Body of the curated
+    # prompts in app/prompts.py stays Spanish — full translation tracked
+    # for v0.3 (the routing signal for the LLM is the *description*, not
+    # the body).
+    mcp_aemps_locale: str = Field(
+        "es",
+        description='LLM-facing language: "es" (default) or "en".',
+    )
+
+    # Optional OAuth 2.1 Resource-Server mode. When OFF (default), every
+    # request is unauthenticated — fine for self-hosted public deployments
+    # since CIMA itself is public. When ON, every MCP tool call (HTTP at
+    # /mcp; stdio is unaffected — stdio is process-local) requires a valid
+    # Bearer token issued by the configured Authorization Server, plus the
+    # required scopes. The Protected Resource Metadata document is exposed
+    # at /.well-known/oauth-protected-resource (RFC 9728) so any
+    # spec-compliant MCP client can discover the AS via DCR (RFC 7591).
+    oauth_enabled: bool = Field(False, description="Enable OAuth 2.1 RS mode")
+    oauth_issuer: Optional[str] = Field(
+        None, description="OAuth Authorization Server issuer URL (e.g. https://auth.example.com)"
+    )
+    oauth_jwks_url: Optional[str] = Field(None, description="JWKS endpoint of the Authorization Server")
+    oauth_audience: Optional[str] = Field(
+        None,
+        description="Expected `aud` claim of issued tokens (this server's resource indicator)",
+    )
+    oauth_required_scopes: Annotated[List[str], NoDecode] = Field(
+        default_factory=lambda: ["mcp:read"],
+        description="Required scopes (comma-separated env var)",
+    )
+
     uvicorn_host: str = Field("0.0.0.0", description="Uvicorn bind host")
     access_host: str = Field("localhost", description="Public host clients use")
     port: int = Field(8000, description="TCP port")
@@ -84,6 +117,19 @@ class Settings(BaseSettings):
     def split_allowed_origins(cls, v):
         if isinstance(v, str):
             return [u.strip() for u in v.split(",") if u.strip()]
+        return v
+
+    @field_validator("oauth_required_scopes", mode="before")
+    def split_oauth_scopes(cls, v):
+        if isinstance(v, str):
+            return [s.strip() for s in v.split(",") if s.strip()]
+        return v
+
+    @field_validator("mcp_aemps_locale", mode="after")
+    def normalise_locale(cls, v):
+        v = (v or "es").strip().lower()
+        if v not in {"es", "en"}:
+            raise ValueError(f"MCP_AEMPS_LOCALE must be 'es' or 'en', got {v!r}")
         return v
 
     @field_validator("allowed_origins", mode="after")

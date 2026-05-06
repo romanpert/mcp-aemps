@@ -5,6 +5,90 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.8] — 2026-05-06
+
+### Added
+- **i18n EN/ES** — locale-dispatched LLM-facing strings. New env var
+  `MCP_AEMPS_LOCALE` (default `es`, accepts `en`) switches every tool
+  description, the system prompt, and the `system_info_prompt`
+  description from Spanish to English. New private modules
+  `app/_mcp_constants_es.py` (the Spanish source of truth, content
+  unchanged from v0.2.7) and `app/_mcp_constants_en.py` (functional
+  English translation of the full surface). `app/mcp_constants.py`
+  collapses to a 50-line dispatcher. **Bodies of the curated prompts
+  in `app/prompts.py` stay Spanish** — the routing signal for the LLM
+  is the *description*, not the body, so the high-impact translation
+  ships first; full body translation deferred.
+
+  Cómo activarlo:
+  ```bash
+  export MCP_AEMPS_LOCALE=en
+  uvx mcp-aemps stdio
+  ```
+  Existing deployments are unaffected (default `es`).
+
+- **OAuth 2.1 Resource-Server mode (opt-in)** — new module `app/auth.py`
+  implementing the RS half of the MCP Authorization spec
+  ([modelcontextprotocol.io](https://modelcontextprotocol.io/specification/draft/basic/authorization)).
+  When `OAUTH_ENABLED=true`, the HTTP transport at `/mcp` requires a
+  valid Bearer token signed by the configured external Authorization
+  Server. stdio is unaffected (process-local).
+
+  Implementation details:
+  * `JWKSTokenVerifier` validates JWT signature against a remote JWKS
+    (RFC 7517, TTL-cached via `pyjwt.PyJWKClient`).
+  * Audience (`aud`), issuer (`iss`), expiry (`exp`) and required
+    scopes (RFC 6749 `scope` / `scp`) are all enforced.
+  * Returns `None` on any failure (malformed token, unknown signing
+    key, wrong audience, missing scopes) — never raises.
+  * `/.well-known/oauth-protected-resource` (RFC 9728 PRM) exposed
+    when OAuth is enabled, advertising the configured AS to
+    spec-compliant clients for DCR (RFC 7591) discovery.
+  * No embedded Authorization Server — point to your existing IdP
+    (Auth0, Stytch, Cloudflare Workers OAuth Provider, Hydra,
+    Keycloak, …). Stays stateless.
+
+  New env vars (all required when `OAUTH_ENABLED=true`, otherwise
+  ignored):
+  * `OAUTH_ENABLED` (bool, default `false`)
+  * `OAUTH_ISSUER` — AS issuer URL
+  * `OAUTH_JWKS_URL` — JWKS endpoint of the AS
+  * `OAUTH_AUDIENCE` — this server's resource indicator (expected
+    `aud` claim)
+  * `OAUTH_REQUIRED_SCOPES` — comma-separated, default `mcp:read`
+
+  Misconfiguration (`OAUTH_ENABLED=true` without the required vars)
+  raises a clear `ValueError` at app-build time, not silently at
+  request time.
+
+### Removed
+- Decided **NOT** to add EU NCAs (EMA / ANSM / AIFA / BfArM /
+  Swissmedic) inside this package. Each NCA has its own response
+  format, language and terms of service; a single mega-package would
+  be a ball of mud. Each NCA will live in its own PyPI package
+  (`mcp-ema`, `mcp-ansm`, …) when implemented, importing mcp-aemps as
+  a base library via the existing extension surface
+  (`app.factory.create_app(extra_routers=…)`).
+
+### Tests
+- 106/106 passing (was 94). New `tests/test_i18n_and_auth.py` covers:
+  * Both `_mcp_constants_*` modules export the same public names
+    (drift = test failure).
+  * Default dispatcher resolves to ES; tool annotations are
+    locale-independent.
+  * Invalid locale value raises Pydantic `ValidationError` at
+    `Settings()` time.
+  * OAuth disabled by default → no PRM, public access.
+  * OAuth enabled → PRM published with correct content.
+  * `JWKSTokenVerifier` accepts a valid signed JWT (in-memory keypair
+    + JWKS stub), rejects wrong audience, rejects missing scopes.
+  * `OAUTH_ENABLED=true` without `OAUTH_AUDIENCE` raises `ValueError`.
+
+  Tests are written without `importlib.reload` to avoid polluting the
+  module cache for the rest of the suite — `monkeypatch.setattr` on
+  the live `settings` instance + a JWKS stub at the verifier
+  constructor level.
+
 ## [0.2.7] — 2026-05-06
 
 ### Added

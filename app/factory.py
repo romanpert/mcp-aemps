@@ -32,6 +32,11 @@ from pydantic import SecretStr
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.routing import Match
 
+from app.auth import (
+    make_auth_settings,
+    make_protected_resource_metadata,
+    make_token_verifier,
+)
 from app.config import settings
 from app.core import OperationError
 from app.lifespan import build_lifespan
@@ -87,11 +92,16 @@ def create_app(
     # manager. ``mount_mcp=False`` skips the HTTP mount but the FastMCP
     # instance still costs ~zero — keeping construction unconditional makes
     # tests simpler.
+    auth_settings = make_auth_settings(settings)
+    token_verifier = make_token_verifier(settings)
+
     mcp_server = (
         build_server(
             pre_tool_hooks=pre_tool_hooks,
             post_tool_hooks=post_tool_hooks,
             streamable_http_path="/",
+            auth_settings=auth_settings,
+            token_verifier=token_verifier,
         )
         if mount_mcp
         else None
@@ -190,6 +200,17 @@ def create_app(
                 "cache": "redis" if getattr(app.state, "redis", None) else "in-memory",
             }
         )
+
+    if settings.oauth_enabled:
+
+        @app.get("/.well-known/oauth-protected-resource", include_in_schema=False)
+        async def protected_resource_metadata():  # noqa: D401
+            """RFC 9728 Protected Resource Metadata.
+
+            Discovery document for spec-compliant MCP clients: tells them
+            which Authorization Server to talk to (DCR + token issuance)
+            and which scopes this resource requires."""
+            return JSONResponse(make_protected_resource_metadata(settings))
 
     @app.get("/internal/metrics", include_in_schema=False)
     async def metrics(x_metrics_key: str | None = Header(default=None)):  # noqa: D401

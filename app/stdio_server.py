@@ -85,6 +85,8 @@ def build_server(
     pre_tool_hooks: Sequence[PreHookFn] = (),
     post_tool_hooks: Sequence[PostHookFn] = (),
     streamable_http_path: str = "/mcp",
+    auth_settings: Any = None,
+    token_verifier: Any = None,
 ) -> FastMCP:
     """Construct the FastMCP server with every official CIMA tool, prompt,
     and resource.
@@ -100,12 +102,21 @@ def build_server(
       passes ``"/"`` so it can mount the resulting app at ``/mcp`` in the
       outer FastAPI app — mounting at ``/mcp`` with the default would
       double the prefix to ``/mcp/mcp``.
+    * ``auth_settings`` / ``token_verifier`` enable OAuth 2.1 Resource-
+      Server mode on the HTTP transport. See ``app.auth`` for the
+      construction helpers. stdio is not affected — process-local access
+      is not gated by OAuth.
     """
-    server = FastMCP(
-        name="mcp-aemps",
-        instructions=MCP_AEMPS_SYSTEM_PROMPT,
-        streamable_http_path=streamable_http_path,
-    )
+    fastmcp_kwargs: dict[str, Any] = {
+        "name": "mcp-aemps",
+        "instructions": MCP_AEMPS_SYSTEM_PROMPT,
+        "streamable_http_path": streamable_http_path,
+    }
+    if auth_settings is not None:
+        fastmcp_kwargs["auth"] = auth_settings
+    if token_verifier is not None:
+        fastmcp_kwargs["token_verifier"] = token_verifier
+    server = FastMCP(**fastmcp_kwargs)
     hooks = HookSet.from_sequences(pre=pre_tool_hooks, post=post_tool_hooks)
 
     def _wrap(func):
