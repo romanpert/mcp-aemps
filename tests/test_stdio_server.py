@@ -137,7 +137,6 @@ def test_http_and_stdio_expose_the_same_tools() -> None:
     http_ops -= {"get_system_info_prompt"}
 
     assert stdio_tools == http_ops, (
-        f"transport drift — only in stdio: {stdio_tools - http_ops}; "
-        f"only in http: {http_ops - stdio_tools}"
+        f"transport drift — only in stdio: {stdio_tools - http_ops}; only in http: {http_ops - stdio_tools}"
     )
     assert stdio_tools == EXPECTED_TOOLS

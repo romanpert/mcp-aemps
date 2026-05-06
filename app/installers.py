@@ -319,9 +319,7 @@ def install_codex(
     return InstallResult("Codex CLI", path, action, f"{server_key} -> {url}")
 
 
-def uninstall_codex(
-    *, server_key: str = SERVER_KEY, config_path: Path | None = None
-) -> InstallResult:
+def uninstall_codex(*, server_key: str = SERVER_KEY, config_path: Path | None = None) -> InstallResult:
     """Remove the [mcp_servers.<server_key>] block from ~/.codex/config.toml."""
     path = config_path or codex_config_path()
     if not path.exists():
@@ -612,9 +610,7 @@ def install_continue(
     return InstallResult("Continue.dev", path, action, f"{server_key} -> {url}; restart your IDE")
 
 
-def uninstall_continue(
-    *, server_key: str = SERVER_KEY, config_path: Path | None = None
-) -> InstallResult:
+def uninstall_continue(*, server_key: str = SERVER_KEY, config_path: Path | None = None) -> InstallResult:
     path = config_path or continue_config_path()
     if not path.exists():
         return InstallResult("Continue.dev", path, "unchanged", f"{server_key} was not present")
@@ -666,9 +662,7 @@ def install_jetbrains(
     existing = config["mcpServers"].get(server_key)
 
     if existing == desired:
-        return InstallResult(
-            "JetBrains Junie", path, "unchanged", f"{server_key} already configured"
-        )
+        return InstallResult("JetBrains Junie", path, "unchanged", f"{server_key} already configured")
 
     action = "updated" if existing else "added"
     config["mcpServers"][server_key] = desired
@@ -682,9 +676,7 @@ def install_jetbrains(
     )
 
 
-def uninstall_jetbrains(
-    *, server_key: str = SERVER_KEY, config_path: Path | None = None
-) -> InstallResult:
+def uninstall_jetbrains(*, server_key: str = SERVER_KEY, config_path: Path | None = None) -> InstallResult:
     path = config_path or jetbrains_config_path()
     config = _read_json(path)
     servers = config.get("mcpServers", {})

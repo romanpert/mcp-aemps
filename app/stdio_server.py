@@ -139,11 +139,27 @@ def build_server(
         pagina: int = 1,
     ) -> dict[str, Any]:
         return await core_buscar_medicamentos(
-            nombre=nombre, laboratorio=laboratorio, practiv1=practiv1, practiv2=practiv2,
-            idpractiv1=idpractiv1, idpractiv2=idpractiv2, atc=atc, cn=cn, nregistro=nregistro,
-            npactiv=npactiv, triangulo=triangulo, huerfano=huerfano, biosimilar=biosimilar,
-            sust=sust, vmp=vmp, comerc=comerc, autorizados=autorizados, receta=receta,
-            estupefaciente=estupefaciente, psicotropo=psicotropo, estuopsico=estuopsico,
+            nombre=nombre,
+            laboratorio=laboratorio,
+            practiv1=practiv1,
+            practiv2=practiv2,
+            idpractiv1=idpractiv1,
+            idpractiv2=idpractiv2,
+            atc=atc,
+            cn=cn,
+            nregistro=nregistro,
+            npactiv=npactiv,
+            triangulo=triangulo,
+            huerfano=huerfano,
+            biosimilar=biosimilar,
+            sust=sust,
+            vmp=vmp,
+            comerc=comerc,
+            autorizados=autorizados,
+            receta=receta,
+            estupefaciente=estupefaciente,
+            psicotropo=psicotropo,
+            estuopsico=estuopsico,
             pagina=pagina,
         )
 
@@ -170,9 +186,16 @@ def build_server(
         pagina: int = 1,
     ) -> dict[str, Any]:
         return await core_listar_presentaciones(
-            cn=cn, nregistro=nregistro, vmp=vmp, vmpp=vmpp, idpractiv1=idpractiv1,
-            comerc=comerc, estupefaciente=estupefaciente, psicotropo=psicotropo,
-            estuopsico=estuopsico, pagina=pagina,
+            cn=cn,
+            nregistro=nregistro,
+            vmp=vmp,
+            vmpp=vmpp,
+            idpractiv1=idpractiv1,
+            comerc=comerc,
+            estupefaciente=estupefaciente,
+            psicotropo=psicotropo,
+            estuopsico=estuopsico,
+            pagina=pagina,
         )
 
     @_tool(description=presentacion_description)
@@ -193,8 +216,14 @@ def build_server(
         pagina: int | None = None,
     ) -> dict[str, Any]:
         return await core_buscar_vmpp(
-            practiv1=practiv1, idpractiv1=idpractiv1, dosis=dosis, forma=forma,
-            atc=atc, nombre=nombre, modoArbol=modoArbol, pagina=pagina,
+            practiv1=practiv1,
+            idpractiv1=idpractiv1,
+            dosis=dosis,
+            forma=forma,
+            atc=atc,
+            nombre=nombre,
+            modoArbol=modoArbol,
+            pagina=pagina,
         )
 
     @_tool(description=maestras_description)
@@ -211,9 +240,15 @@ def build_server(
         pagina: int = 1,
     ) -> dict[str, Any]:
         return await core_consultar_maestras(
-            maestra=maestra, nombre=nombre, id=id, codigo=codigo,
-            estupefaciente=estupefaciente, psicotropo=psicotropo, estuopsico=estuopsico,
-            enuso=enuso, pagina=pagina,
+            maestra=maestra,
+            nombre=nombre,
+            id=id,
+            codigo=codigo,
+            estupefaciente=estupefaciente,
+            psicotropo=psicotropo,
+            estuopsico=estuopsico,
+            enuso=enuso,
+            pagina=pagina,
         )
 
     # ------------------------------------------------------------------
@@ -237,7 +272,10 @@ def build_server(
         tamanioPagina: int = 25,
     ) -> dict[str, Any]:
         return await core_problemas_suministro(
-            cn=cn, nregistro=nregistro, pagina=pagina, tamanioPagina=tamanioPagina,
+            cn=cn,
+            nregistro=nregistro,
+            pagina=pagina,
+            tamanioPagina=tamanioPagina,
         )
 
     @_tool(description=problemas_suministro_dcp_description)
@@ -292,7 +330,11 @@ def build_server(
         format: str = "json",
     ) -> Any:
         result = await core_doc_contenido(
-            tipo_doc=tipo_doc, nregistro=nregistro, cn=cn, seccion=seccion, format=format,
+            tipo_doc=tipo_doc,
+            nregistro=nregistro,
+            cn=cn,
+            seccion=seccion,
+            format=format,
         )
         # html / txt → return raw content; json → return the dict.
         if format != "json" and isinstance(result, dict) and "content" in result:

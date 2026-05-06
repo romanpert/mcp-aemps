@@ -37,9 +37,7 @@ async def core_registro_cambios(
     nregistro: list[str] | None = None,
     metodo: str = "GET",
 ) -> dict[str, Any]:
-    resultados = await safe_call(
-        cima.registro_cambios, fecha=fecha, nregistro=nregistro, metodo=metodo
-    )
+    resultados = await safe_call(cima.registro_cambios, fecha=fecha, nregistro=nregistro, metodo=metodo)
     if resultados is None:
         resultados = {"totalFilas": 0, "pagina": 1, "tamanioPagina": 0, "resultados": []}
 
@@ -78,9 +76,7 @@ async def core_problemas_suministro(
     metadatos["metadata"]["tipo_problema_suministros"] = cima.TIPOS_PROBLEMA
 
     if not cn and not nregistro:
-        listado = await safe_call(
-            cima.psuministro_global, pagina=pagina, tamanioPagina=tamanioPagina
-        )
+        listado = await safe_call(cima.psuministro_global, pagina=pagina, tamanioPagina=tamanioPagina)
         data = listado.get("resultados", []) if isinstance(listado, dict) else listado
         return format_response(data, metadatos)
 

@@ -134,9 +134,7 @@ def test_stdio_pre_hook_aborts_with_operation_error_dict() -> None:
     tools = asyncio.run(server.list_tools())
     obtener = next(t for t in tools if t.name == "obtener_medicamento")
 
-    result = asyncio.run(
-        server.call_tool(obtener.name, {"cn": "12345"})
-    )
+    result = asyncio.run(server.call_tool(obtener.name, {"cn": "12345"}))
     # FastMCP returns (content, structured_content) in modern versions.
     # The structured content (dict) carries our serialised OperationError.
     structured = result[1] if isinstance(result, tuple) else result

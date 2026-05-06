@@ -63,7 +63,10 @@ async def problemas_suministro(
     tamanioPagina: int = Query(25, ge=1, le=100, description="Tamano de pagina (solo en listado global)"),
 ) -> Dict[str, Any]:
     return await core_problemas_suministro(
-        cn=cn, nregistro=nregistro, pagina=pagina, tamanioPagina=tamanioPagina,
+        cn=cn,
+        nregistro=nregistro,
+        pagina=pagina,
+        tamanioPagina=tamanioPagina,
     )
 
 

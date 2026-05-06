@@ -109,9 +109,7 @@ async def core_doc_contenido(
         )
 
     ext_map = {"json": "html", "html": "html", "txt": "txt"}
-    cima_url = build_dochtml_url(
-        tipo_doc=tipo_doc, nregistro=nr_norm, seccion=seccion, ext=ext_map[format]
-    )
+    cima_url = build_dochtml_url(tipo_doc=tipo_doc, nregistro=nr_norm, seccion=seccion, ext=ext_map[format])
 
     resultado = await safe_call(
         cima.doc_contenido,
@@ -209,9 +207,7 @@ async def _fetch_html_single(tipo: str, nregistro: str, filename: str, label: st
     return data.decode("utf-8")
 
 
-async def core_html_ficha_tecnica(
-    *, nregistro: str, filename: str = "FichaTecnica.html"
-) -> str:
+async def core_html_ficha_tecnica(*, nregistro: str, filename: str = "FichaTecnica.html") -> str:
     return await _fetch_html_single("ft", nregistro, filename, "Ficha tecnica")
 
 

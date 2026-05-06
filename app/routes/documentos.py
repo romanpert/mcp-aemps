@@ -69,7 +69,11 @@ async def doc_contenido(
     format: Format = Query(Format.json, description="Formato: json, html o txt"),
 ) -> Any:
     resultado = await core_doc_contenido(
-        tipo_doc=tipo_doc, nregistro=nregistro, cn=cn, seccion=seccion, format=format.value,
+        tipo_doc=tipo_doc,
+        nregistro=nregistro,
+        cn=cn,
+        seccion=seccion,
+        format=format.value,
     )
     if format == Format.json:
         return resultado

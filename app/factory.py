@@ -181,11 +181,7 @@ def create_app(
     async def metrics(x_metrics_key: str | None = Header(default=None)):  # noqa: D401
         configured = settings.metrics_key
         if configured is not None:
-            expected = (
-                configured.get_secret_value()
-                if isinstance(configured, SecretStr)
-                else str(configured)
-            )
+            expected = configured.get_secret_value() if isinstance(configured, SecretStr) else str(configured)
             if not x_metrics_key or x_metrics_key != expected:
                 raise HTTPException(status_code=401, detail="Invalid or missing X-Metrics-Key.")
         return JSONResponse(METRICS.snapshot())

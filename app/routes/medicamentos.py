@@ -53,7 +53,9 @@ async def obtener_medicamento(
     dependencies=[limit_standard],
 )
 async def buscar_medicamentos(
-    nombre: Optional[str] = Query(None, description="Nombre del medicamento (coincidencia parcial o exacta)."),
+    nombre: Optional[str] = Query(
+        None, description="Nombre del medicamento (coincidencia parcial o exacta)."
+    ),
     laboratorio: Optional[str] = Query(None, description="Nombre del laboratorio fabricante."),
     practiv1: Optional[str] = Query(None, description="Nombre del principio activo principal."),
     practiv2: Optional[str] = Query(None, description="Nombre de un segundo principio activo."),
@@ -71,17 +73,37 @@ async def buscar_medicamentos(
     comerc: Optional[int] = Query(None, ge=0, le=1, description="1 = Comercializados, 0 = No."),
     autorizados: Optional[int] = Query(None, ge=0, le=1, description="1 = Solo autorizados, 0 = No."),
     receta: Optional[int] = Query(None, ge=0, le=1, description="1 = Con receta, 0 = Sin receta."),
-    estupefaciente: Optional[int] = Query(None, ge=0, le=1, description="1 = Incluye estupefacientes, 0 = Excluye."),
+    estupefaciente: Optional[int] = Query(
+        None, ge=0, le=1, description="1 = Incluye estupefacientes, 0 = Excluye."
+    ),
     psicotropo: Optional[int] = Query(None, ge=0, le=1, description="1 = Incluye psicotropos, 0 = Excluye."),
-    estuopsico: Optional[int] = Query(None, ge=0, le=1, description="1 = Incluye estupefacientes o psicotropos, 0 = Excluye."),
+    estuopsico: Optional[int] = Query(
+        None, ge=0, le=1, description="1 = Incluye estupefacientes o psicotropos, 0 = Excluye."
+    ),
     pagina: Optional[int] = Query(1, ge=1, description="Numero de pagina de resultados (minimo 1)."),
 ) -> Dict[str, Any]:
     return await core_buscar_medicamentos(
-        nombre=nombre, laboratorio=laboratorio, practiv1=practiv1, practiv2=practiv2,
-        idpractiv1=idpractiv1, idpractiv2=idpractiv2, cn=cn, atc=atc, nregistro=nregistro,
-        npactiv=npactiv, triangulo=triangulo, huerfano=huerfano, biosimilar=biosimilar,
-        sust=sust, vmp=vmp, comerc=comerc, autorizados=autorizados, receta=receta,
-        estupefaciente=estupefaciente, psicotropo=psicotropo, estuopsico=estuopsico,
+        nombre=nombre,
+        laboratorio=laboratorio,
+        practiv1=practiv1,
+        practiv2=practiv2,
+        idpractiv1=idpractiv1,
+        idpractiv2=idpractiv2,
+        cn=cn,
+        atc=atc,
+        nregistro=nregistro,
+        npactiv=npactiv,
+        triangulo=triangulo,
+        huerfano=huerfano,
+        biosimilar=biosimilar,
+        sust=sust,
+        vmp=vmp,
+        comerc=comerc,
+        autorizados=autorizados,
+        receta=receta,
+        estupefaciente=estupefaciente,
+        psicotropo=psicotropo,
+        estuopsico=estuopsico,
         pagina=pagina,
     )
 
@@ -119,13 +141,24 @@ async def listar_presentaciones(
     vmpp: Optional[str] = Query(None, description="ID del codigo VMPP."),
     idpractiv1: Optional[str] = Query(None, description="ID del principio activo."),
     comerc: Optional[int] = Query(None, ge=0, le=1, description="1 = Comercializados, 0 = No."),
-    estupefaciente: Optional[int] = Query(None, ge=0, le=1, description="1 = Incluye estupefacientes, 0 = Excluye."),
+    estupefaciente: Optional[int] = Query(
+        None, ge=0, le=1, description="1 = Incluye estupefacientes, 0 = Excluye."
+    ),
     psicotropo: Optional[int] = Query(None, ge=0, le=1, description="1 = Incluye psicotropos, 0 = Excluye."),
-    estuopsico: Optional[int] = Query(None, ge=0, le=1, description="1 = Incluye estupefacientes o psicotropos, 0 = Excluye."),
+    estuopsico: Optional[int] = Query(
+        None, ge=0, le=1, description="1 = Incluye estupefacientes o psicotropos, 0 = Excluye."
+    ),
 ) -> Dict[str, Any]:
     return await core_listar_presentaciones(
-        cn=cn, nregistro=nregistro, vmp=vmp, vmpp=vmpp, idpractiv1=idpractiv1,
-        comerc=comerc, estupefaciente=estupefaciente, psicotropo=psicotropo, estuopsico=estuopsico,
+        cn=cn,
+        nregistro=nregistro,
+        vmp=vmp,
+        vmpp=vmpp,
+        idpractiv1=idpractiv1,
+        comerc=comerc,
+        estupefaciente=estupefaciente,
+        psicotropo=psicotropo,
+        estuopsico=estuopsico,
     )
 
 
@@ -162,8 +195,14 @@ async def buscar_vmpp(
     pagina: Optional[int] = Query(None, ge=1, description="Numero de pagina (si aplica)"),
 ) -> Dict[str, Any]:
     return await core_buscar_vmpp(
-        practiv1=practiv1, idpractiv1=idpractiv1, dosis=dosis, forma=forma, atc=atc,
-        nombre=nombre, modoArbol=modoArbol, pagina=pagina,
+        practiv1=practiv1,
+        idpractiv1=idpractiv1,
+        dosis=dosis,
+        forma=forma,
+        atc=atc,
+        nombre=nombre,
+        modoArbol=modoArbol,
+        pagina=pagina,
     )
 
 
@@ -187,7 +226,13 @@ async def consultar_maestras(
     pagina: Optional[int] = Query(1, ge=1, description="Numero de pagina (si la API lo soporta)."),
 ) -> Dict[str, Any]:
     return await core_consultar_maestras(
-        maestra=maestra, nombre=nombre, id=id, codigo=codigo,
-        estupefaciente=estupefaciente, psicotropo=psicotropo, estuopsico=estuopsico,
-        enuso=enuso, pagina=pagina,
+        maestra=maestra,
+        nombre=nombre,
+        id=id,
+        codigo=codigo,
+        estupefaciente=estupefaciente,
+        psicotropo=psicotropo,
+        estuopsico=estuopsico,
+        enuso=enuso,
+        pagina=pagina,
     )
