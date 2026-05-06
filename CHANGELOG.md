@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.10] — 2026-05-06
+
+### Validated (no behaviour change)
+- **OAuth 2.1 enforcement is real**, not just configured. The v0.2.8
+  unit tests covered the `JWKSTokenVerifier` in isolation but never
+  proved that FastMCP's `RequireAuthMiddleware` actually invokes it on
+  HTTP requests to `/mcp`. v0.2.10 closes that loop with 4 end-to-end
+  tests against the mounted `/mcp` endpoint:
+
+  * `POST /mcp` without an Authorization header → **401 + WWW-Authenticate
+    header** containing `Bearer error="invalid_token"` and the
+    `resource_metadata=` pointer (RFC 6750 §3 + RFC 9728), so
+    spec-compliant MCP clients can self-discover the AS.
+  * `POST /mcp` with garbage Bearer token → **401**, not 500 — internal
+    verifier exceptions never leak.
+  * `POST /mcp` with a valid signed JWT → auth layer passes, MCP
+    protocol takes over.
+  * `POST /mcp` with OAuth disabled (default) → no auth required, no
+    regression for public-by-default deployments.
+
+  No code changes were required — the v0.2.8 wiring of `auth=` and
+  `token_verifier=` to FastMCP was correct, and the
+  `WWW-Authenticate` header is emitted by FastMCP's built-in
+  `RequireAuthMiddleware`. v0.2.10 is the proof, not the fix.
+
+### Tests
+- 114/114 passing (was 110). 4 new tests in
+  `tests/test_i18n_and_auth.py` under the
+  `# OAuth 2.1 — end-to-end against /mcp` heading.
+
 ## [0.2.9] — 2026-05-06
 
 ### Added

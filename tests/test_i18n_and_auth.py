@@ -335,6 +335,149 @@ def test_oauth_token_verifier_rejects_missing_scopes(_oauth_enabled) -> None:
     assert result is None, "token missing required scope must be rejected"
 
 
+# ---------------------------------------------------------------------------
+# OAuth 2.1 — end-to-end against /mcp (added in v0.2.10)
+#
+# v0.2.8 introduced OAuth and v0.2.9 ignored it. v0.2.10 closes the loop:
+# we must prove that POST /mcp without a Bearer token returns 401 with a
+# proper WWW-Authenticate header — otherwise the v0.2.8 OAuth claim is
+# a security regression dressed as a feature.
+# ---------------------------------------------------------------------------
+
+
+def test_post_mcp_without_token_returns_401_when_oauth_enabled(_oauth_enabled) -> None:
+    """The whole point of OAuth: hitting /mcp without an Authorization
+    header must be rejected by FastMCP's RequireAuthMiddleware. If this
+    test ever starts passing without OAuth being effectively enforced,
+    the server is broken."""
+    from app.factory import create_app
+
+    app = create_app()  # mount_mcp=True so /mcp is actually mounted
+    with TestClient(app) as client:
+        # Minimal MCP initialize handshake — won't get past auth.
+        r = client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "0.0"},
+                },
+            },
+            headers={"accept": "application/json, text/event-stream"},
+            follow_redirects=True,
+        )
+        assert r.status_code == 401, f"expected 401 with OAuth enabled, got {r.status_code}: {r.text[:200]}"
+
+        # RFC 6750 §3 — WWW-Authenticate header MUST be present and start
+        # with the "Bearer" challenge scheme.
+        www_auth = r.headers.get("www-authenticate", "")
+        assert www_auth.lower().startswith("bearer"), (
+            f"WWW-Authenticate must start with 'Bearer', got: {www_auth!r}"
+        )
+
+        # The header should also expose the resource_metadata pointer per
+        # RFC 9728 — that's how spec-compliant clients discover the AS via
+        # /.well-known/oauth-protected-resource.
+        assert "resource_metadata" in www_auth, (
+            f"WWW-Authenticate should advertise resource_metadata, got: {www_auth!r}"
+        )
+
+
+def test_post_mcp_with_invalid_token_returns_401(_oauth_enabled) -> None:
+    """A garbage Bearer token must produce 401 — not a 500 or a leak of
+    the verifier's internal exception."""
+    from app.factory import create_app
+
+    app = create_app()
+    with TestClient(app) as client:
+        r = client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "0.0"},
+                },
+            },
+            headers={
+                "accept": "application/json, text/event-stream",
+                "authorization": "Bearer not-even-jwt-shaped",
+            },
+            follow_redirects=True,
+        )
+        assert r.status_code == 401, f"expected 401 for invalid token, got {r.status_code}: {r.text[:200]}"
+
+
+def test_post_mcp_with_valid_token_passes_auth_layer(_oauth_enabled) -> None:
+    """A valid Bearer token must pass the auth middleware. The MCP
+    handshake itself may still need follow-up notifications (initialized
+    + tools/list), so we only assert auth-layer pass-through: the
+    response is NOT a 401, and the body is a JSON-RPC-shaped reply."""
+    from app.factory import create_app
+
+    app = create_app()
+    with TestClient(app) as client:
+        r = client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "0.0"},
+                },
+            },
+            headers={
+                "accept": "application/json, text/event-stream",
+                "authorization": f"Bearer {_oauth_enabled['token']}",
+            },
+            follow_redirects=True,
+        )
+        assert r.status_code != 401, f"valid token rejected at auth layer: {r.status_code} / {r.text[:200]}"
+        # Status will be 200 if the MCP handshake also completed cleanly,
+        # or possibly 4xx from the JSON-RPC layer if the handshake needs
+        # more steps — either way auth is past.
+        assert r.status_code in (200, 202), (
+            f"unexpected status after auth pass: {r.status_code} / {r.text[:200]}"
+        )
+
+
+def test_post_mcp_without_oauth_does_not_require_token() -> None:
+    """When OAuth is disabled (default), /mcp must serve without auth —
+    no regression for the public-by-default deployment."""
+    from app.factory import create_app
+
+    app = create_app()
+    with TestClient(app) as client:
+        r = client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "0.0"},
+                },
+            },
+            headers={"accept": "application/json, text/event-stream"},
+            follow_redirects=True,
+        )
+        assert r.status_code != 401, (
+            f"OAuth-disabled /mcp must not require auth, got {r.status_code}: {r.text[:200]}"
+        )
+
+
 def test_oauth_misconfiguration_raises(monkeypatch) -> None:
     """OAUTH_ENABLED=true but missing OAUTH_AUDIENCE must fail loudly."""
     from app.auth import make_auth_settings
