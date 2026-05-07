@@ -151,6 +151,33 @@ def _parse_fecha(valor: Any) -> Any:
     return valor
 
 
+# 429 retry policy (v0.4.12 audit fix #1)
+# AEMPS publishes no formal rate limits but its CDN does throttle on
+# burst. Pre-v0.4.12 a single 429 propagated to the caller as a 5xx,
+# making transient throttles indistinguishable from outages. A single
+# bounded retry catches the vast majority — anything past one retry
+# means the server is hammering CIMA and ought to back off harder
+# rather than queue more requests.
+_RETRY_429_DEFAULT_DELAY_SECONDS = 1.0
+_RETRY_429_MAX_DELAY_SECONDS = 8.0
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """Parse the ``Retry-After`` HTTP header. CIMA emits seconds-as-int;
+    standards also allow HTTP-date but we treat anything non-numeric as
+    "use the default" rather than parsing dates (over-engineered for
+    the single observed CIMA pattern)."""
+    if not value:
+        return None
+    try:
+        n = float(value.strip())
+    except (TypeError, ValueError):
+        return None
+    if n < 0:
+        return None
+    return min(n, _RETRY_429_MAX_DELAY_SECONDS)
+
+
 async def _request(
     method: str,
     path: str,
@@ -162,6 +189,8 @@ async def _request(
     # Lazy import to avoid circulars: rate_limits imports config which is fine,
     # but cima_client is a dep of cache which is a dep of factory; keep the
     # global semaphore reference here.
+    import random as _random
+
     from app.rate_limits import CIMA_FANOUT_SEMAPHORE
 
     # Use the shared process-wide client unless a caller passed one
@@ -195,6 +224,22 @@ async def _request(
             resp = await client.request(
                 method, full_url, params=clean_params, json=json_body, headers=headers
             )
+
+        # Single bounded retry on 429. We honour ``Retry-After`` if
+        # present (capped at 8s — anything longer means we should let
+        # the original 429 surface); else default to 1s + a jittered
+        # 0-500ms so a multi-replica deployment doesn't dogpile back
+        # at the same instant.
+        if resp.status_code == 429:
+            retry_after = _parse_retry_after(resp.headers.get("Retry-After"))
+            delay = retry_after if retry_after is not None else _RETRY_429_DEFAULT_DELAY_SECONDS
+            delay += _random.uniform(0.0, 0.5)
+            logger.warning("CIMA 429 on %s %s; sleeping %.2fs then retrying once", method, path, delay)
+            await asyncio.sleep(delay)
+            async with CIMA_FANOUT_SEMAPHORE:
+                resp = await client.request(
+                    method, full_url, params=clean_params, json=json_body, headers=headers
+                )
 
         # 304 Not Modified — return cached parsed response without re-parsing.
         if resp.status_code == 304 and cached_entry is not None:

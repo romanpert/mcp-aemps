@@ -25,7 +25,17 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-MAESTRAS_TYPES: tuple[int, ...] = (1, 2, 3, 4, 5)
+# CIMA REST API v1.23 §maestras documents the IDs 1, 3, 4, 6, 7,
+# 11, 13, 14, 15, 16. IDs 2 and 5 do NOT exist — they return
+# `204 No Content`. The pre-v0.4.12 list `(1, 2, 3, 4, 5)` was a
+# carry-over from an early misreading of the spec; warming hit two
+# invalid IDs on every startup, polluting logs with two harmless-
+# but-confusing 204s. We now warm the five core catalogues actually
+# referenced by the tools (principios activos, formas farmacéuticas,
+# vías de administración, laboratorios, ATC). The SNOMED maestras
+# (11/13/14/15/16) are large and rarely queried interactively, so
+# we keep them off the warmup path.
+MAESTRAS_TYPES: tuple[int, ...] = (1, 3, 4, 6, 7)
 MAESTRAS_TTL_SECONDS = 86_400  # 24h
 
 _DEFAULT_MAXSIZE = 4096

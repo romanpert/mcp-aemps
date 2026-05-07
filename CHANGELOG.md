@@ -5,6 +5,73 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.12] — 2026-05-08
+
+Closes the four audit-backlog items deferred in v0.4.11, fixes a startup
+data bug, lands the Antigravity installer, and reorders the CLI install
+output so client-detection comes first.
+
+### Fixed
+
+- **`MAESTRAS_TYPES` startup bug.** Pre-v0.4.12 the warmup hit
+  `?maestra=2` and `?maestra=5` — IDs that don't exist in the CIMA
+  REST API v1.23 spec — and CIMA returned `204 No Content` for both,
+  polluting startup logs. Now warms `(1, 3, 4, 6, 7)`: principios
+  activos, formas farmacéuticas, vías de administración, laboratorios,
+  ATC. The five core catalogues actually used by the tools.
+
+### Added
+
+- **Google Antigravity installer.** Config path
+  `~/.gemini/antigravity/mcp_config.json::mcpServers`. stdio default
+  with the canonical uvx launcher; HTTP uses ``serverUrl`` (same
+  Windsurf-style quirk). Antigravity reloads its config on save so no
+  IDE restart is needed. Detection probes the config dir + a hypothetical
+  `antigravity` binary on PATH. Brings the supported-clients count to
+  10. Verified against
+  github/github-mcp-server's installation guide (the canonical
+  third-party reference) and Google's own docs.
+- **CIMA 429 retry with bounded single-attempt backoff** (audit
+  backlog #1). `_request` now catches a 429, sleeps `Retry-After`
+  (capped at 8s, default 1s) plus a 0-500ms jitter, and retries
+  exactly once. Persistent 429 still surfaces to the caller — we
+  never loop. New parser `_parse_retry_after` handles malformed /
+  HTTP-date / negative values defensively.
+- **`/internal/metrics` rate-limited** on the `local` tier
+  (500/min/IP) so a leaked `METRICS_KEY` can't be turned into a free
+  scraping DoS (audit backlog #4). 500/min ≈ 8/s — well above any
+  legitimate Prometheus / Grafana scrape interval.
+- **Direct `cima_client` unit tests** (audit backlog #3). 9 new
+  tests in `tests/test_cima_client.py` covering: ETag round-trip
+  (304 reuse), 429 retry honouring `Retry-After`, 429 default delay
+  when header absent, persistent-429 propagation,
+  `_parse_retry_after` invariants, and the shared-client singleton.
+  Network mocked via `httpx.MockTransport` so the suite stays
+  hermetic.
+
+### Changed
+
+- **CLI install output reordered for UX clarity.** Pre-v0.4.12 the
+  client-detection NOTE appeared *after* the install action line, so
+  users assumed the install succeeded when in fact the client wasn't
+  on the machine. Now every install prints `🔍 <Client> · detected`
+  (green) or `🔍 <Client> · not detected` (yellow) **before** the
+  action icon and message. Reading order: "is it there?" → "what did
+  we do?" → "any extra warnings?".
+
+### Audit backlog status
+
+- ✅ #1 429 retry: shipped here.
+- ⏭️ #2 `format_response` refactor: still deferred. Touches every
+  `core_<op>`; the Pydantic envelopes already cover the user-facing
+  contract via `outputSchema`. Re-evaluate at v0.5.0.
+- ✅ #3 cima_client tests: shipped here (9 new tests).
+- ✅ #4 metrics rate limit: shipped here.
+
+### Tests
+
+- 176/176 (9 new). Pre-commit gate green.
+
 ## [0.4.11] — 2026-05-08
 
 Broader audit pass. Fixed three concrete code issues + refreshed every

@@ -387,11 +387,31 @@ _INSTALL_ICONS = {"added": "✅", "updated": "🔄", "unchanged": "ℹ️", "rem
 
 def _print_install_result(res) -> None:
     icon = _INSTALL_ICONS.get(res.action, "•")
+
+    # UX rule (v0.4.12): print client-detection status FIRST so the user
+    # reads "is the IDE installed?" before "did we configure it?". The
+    # detection NOTEs come from _check_client_installed in the installer
+    # and use the prefix "NOTE:". Pre-v0.4.12 we printed the install
+    # action first and the detection NOTE last as a footer — that order
+    # made users assume the install succeeded when in fact the client
+    # wasn't even on the machine.
+    warnings = getattr(res, "warnings", ()) or ()
+    detection_note = next(
+        (w for w in warnings if w.startswith("NOTE:") and "doesn't appear to be installed" in w),
+        None,
+    )
+    other_warnings = [w for w in warnings if w is not detection_note]
+
+    if detection_note is not None:
+        console.print(f"🔍  [bold]{res.client}[/] · [yellow]not detected[/]")
+        console.print(f"    [yellow]{detection_note}[/yellow]")
+    else:
+        console.print(f"🔍  [bold]{res.client}[/] · [green]detected[/]")
+
     console.print(f"{icon}  [bold]{res.client}[/]  ({res.action}) — {res.message}")
     console.print(f"    [dim]config: {res.config_path}[/dim]")
-    for warning in getattr(res, "warnings", ()) or ():
-        # Style: yellow for prereq warnings (WARNING:), cyan for info
-        # notes (NOTE:). Both are informational; don't fail the install.
+
+    for warning in other_warnings:
         style = "yellow" if warning.startswith("WARNING") else "cyan"
         console.print(f"    [{style}]{warning}[/{style}]")
 

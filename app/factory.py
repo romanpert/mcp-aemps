@@ -212,7 +212,15 @@ def create_app(
             and which scopes this resource requires."""
             return JSONResponse(make_protected_resource_metadata(settings))
 
-    @app.get("/internal/metrics", include_in_schema=False)
+    # Rate-limit /internal/metrics on the same `local` tier as in-process
+    # endpoints (v0.4.12 audit fix #4): even with a key, an attacker who
+    # exfiltrates it shouldn't be able to scrape forever, and a misconfigured
+    # Prometheus scraper hitting once per second still stays within budget
+    # (500/min ≈ 8/s). Pre-v0.4.12 the metrics endpoint was unbounded —
+    # unbounded scraping is a free DoS vector if the key ever leaks.
+    from app.rate_limits import limit_local
+
+    @app.get("/internal/metrics", include_in_schema=False, dependencies=[limit_local])
     async def metrics(x_metrics_key: str | None = Header(default=None)):  # noqa: D401
         configured = settings.metrics_key
         if configured is not None:

@@ -39,6 +39,9 @@ Supported clients (config path · format quirks):
                     each entry has ``type`` = stdio | streamable-http | sse
                     — NOT ``http`` which is invalid).
 - JetBrains Junie · ``~/.junie/mcp.json::mcpServers``
+- Antigravity     · ``~/.gemini/antigravity/mcp_config.json::mcpServers``
+                    (Google's late-2025 agentic IDE; HTTP uses
+                    ``serverUrl``, same convention as Windsurf)
 """
 
 from __future__ import annotations
@@ -129,6 +132,7 @@ _CLIENT_INSTALL_HINTS: dict[str, str] = {
     "Zed": "https://zed.dev/download",
     "Continue.dev": "https://www.continue.dev/",
     "JetBrains Junie": "https://www.jetbrains.com/junie/",
+    "Antigravity": "https://antigravity.google/",
 }
 
 
@@ -1146,6 +1150,96 @@ def uninstall_jetbrains(*, server_key: str = SERVER_KEY, config_path: Path | Non
 
 
 # ---------------------------------------------------------------------------
+# Google Antigravity
+# ---------------------------------------------------------------------------
+# Antigravity is Google's late-2025 agentic IDE. MCP config lives under
+# the gemini config tree, NOT alongside other IDE configs. Schema is
+# the standard ``mcpServers`` envelope used by Cursor / Windsurf / Junie,
+# but with one Antigravity-specific quirk shared with Windsurf: HTTP
+# entries use ``serverUrl`` (not ``url``). Verified against the
+# upstream guidance at
+# https://github.com/github/github-mcp-server/blob/main/docs/installation-guides/install-antigravity.md
+# (2026-01).
+
+
+def antigravity_config_path() -> Path:
+    """Antigravity MCP config — cross-platform per Path.home().
+
+    macOS / Linux: ``~/.gemini/antigravity/mcp_config.json``
+    Windows:       ``C:\\Users\\<USER>\\.gemini\\antigravity\\mcp_config.json``
+    """
+    return Path.home() / ".gemini" / "antigravity" / "mcp_config.json"
+
+
+def install_antigravity(
+    *,
+    url: str | None = None,
+    server_key: str = SERVER_KEY,
+    config_path: Path | None = None,
+    transport: str = "stdio",
+) -> InstallResult:
+    """Add to Antigravity's MCP config (``~/.gemini/antigravity/mcp_config.json``).
+
+    Defaults to stdio with the canonical launcher. Antigravity reloads
+    the config automatically after save — no IDE restart needed (per
+    Google's docs).
+    """
+    path = config_path or antigravity_config_path()
+    warnings = _collect_install_warnings(
+        "Antigravity",
+        config_dirs=(path.parent, Path.home() / ".gemini"),
+        path_binaries=("antigravity",),
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    config = _read_json(path)
+    config.setdefault("mcpServers", {})
+
+    if transport == "stdio":
+        desired: dict[str, Any] = _stdio_block()
+        message_target = "(uvx auto-launch)"
+        if w := _check_command_on_path(STDIO_COMMAND):
+            warnings = (*warnings, w)
+    else:
+        url = url or _default_url()
+        # Antigravity uses ``serverUrl`` (same convention as Windsurf).
+        desired = {"serverUrl": url}
+        message_target = f"-> {url}"
+        warnings = (
+            *warnings,
+            f"NOTE: http transport requires a running server at {url}.",
+        )
+
+    existing = config["mcpServers"].get(server_key)
+
+    if existing == desired:
+        return InstallResult(
+            "Antigravity", path, "unchanged", f"{server_key} already configured", warnings=warnings
+        )
+
+    action = "updated" if existing else "added"
+    config["mcpServers"][server_key] = desired
+    _atomic_write_json(path, config)
+    return InstallResult(
+        "Antigravity",
+        path,
+        action,
+        f"{server_key} {message_target} (Antigravity reloads automatically)",
+        warnings=warnings,
+    )
+
+
+def uninstall_antigravity(*, server_key: str = SERVER_KEY, config_path: Path | None = None) -> InstallResult:
+    path = config_path or antigravity_config_path()
+    config = _read_json(path)
+    servers = config.get("mcpServers", {})
+    if server_key in servers:
+        del servers[server_key]
+        _atomic_write_json(path, config)
+        return InstallResult("Antigravity", path, "removed", f"{server_key} removed")
+    return InstallResult("Antigravity", path, "unchanged", f"{server_key} was not present")
+
+
+# ---------------------------------------------------------------------------
 # Registry — used by the `mcp-aemps install` (no subcommand) "all" path
 # ---------------------------------------------------------------------------
 ALL_INSTALLERS = {
@@ -1158,6 +1252,7 @@ ALL_INSTALLERS = {
     "zed": install_zed,
     "continue": install_continue,
     "jetbrains": install_jetbrains,
+    "antigravity": install_antigravity,
 }
 
 ALL_UNINSTALLERS = {
@@ -1170,4 +1265,5 @@ ALL_UNINSTALLERS = {
     "zed": uninstall_zed,
     "continue": uninstall_continue,
     "jetbrains": uninstall_jetbrains,
+    "antigravity": uninstall_antigravity,
 }
