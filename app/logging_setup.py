@@ -24,6 +24,28 @@ from app.config import settings
 _LOG_FORMAT = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 
 
+class _RenameUvicornErrorFilter(logging.Filter):
+    """Rewrite the misleading ``uvicorn.error`` logger name to plain
+    ``uvicorn`` in emitted records.
+
+    Why this exists: uvicorn's main lifecycle logger is named
+    ``uvicorn.error`` for historical reasons (the project split access
+    vs everything-else logs, and the everything-else channel kept the
+    legacy name). It emits *all* severity levels through that name —
+    including the INFO-level "Started server process", "Waiting for
+    application startup", "Uvicorn running on ..." lines you see at
+    boot. Users reasonably read "uvicorn.error" as "this is an error",
+    when in fact only the level field carries severity. Renaming the
+    record keeps stdlib logger hierarchy intact for filters that care
+    while making the human-readable output unambiguous.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:  # noqa: D401
+        if record.name == "uvicorn.error":
+            record.name = "uvicorn"
+        return True
+
+
 # Spec ref: MCP logging utility (modelcontextprotocol.io/specification/server/utilities/logging)
 # uses RFC 5424 syslog levels. Map them down to the stdlib's narrower set.
 _MCP_LEVEL_TO_STDLIB: dict[str, int] = {
@@ -74,8 +96,11 @@ def configure_logging() -> logging.Logger:
 
     fmt = logging.Formatter(_LOG_FORMAT)
 
+    rename_filter = _RenameUvicornErrorFilter()
+
     console = logging.StreamHandler()
     console.setFormatter(fmt)
+    console.addFilter(rename_filter)
     root.addHandler(console)
 
     for name in ("uvicorn", "uvicorn.error"):
@@ -106,6 +131,7 @@ def configure_logging() -> logging.Logger:
             file_handler.namer = _namer
             file_handler.rotator = _rotator
             file_handler.setFormatter(fmt)
+            file_handler.addFilter(rename_filter)
             root.addHandler(file_handler)
         except Exception as exc:  # noqa: BLE001
             # Mirror the file-handler failure to stderr so a deployer

@@ -5,7 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.13] — 2026-05-07
+## [0.4.14] — 2026-05-07
+
+Senior-dev audit pass after v0.4.13. Fixes confusing log output, a
+leaked dev default in CORS, an observability blind-spot when Redis is
+broken, and a stdio task that could be GC'd before running.
+
+### Changed
+
+- **`uvicorn.error` log lines now display as `uvicorn`.** Uvicorn
+  emits *all* its lifecycle messages — including INFO-level
+  "Started server process", "Waiting for application startup" and
+  "Uvicorn running on …" — through a logger historically named
+  `uvicorn.error`. Our default format `%(name)s` surfaced that name
+  verbatim, which read as "these are errors" even though the
+  level field clearly said `INFO`. Added a logging Filter
+  (`_RenameUvicornErrorFilter` in `app/logging_setup.py`) that
+  rewrites `record.name` to plain `uvicorn` on emit. Stdlib
+  hierarchy is untouched, so log-aggregation filters that key off
+  the original name still work upstream.
+- **`ALLOWED_ORIGINS` defaults to empty list, not
+  `["http://localhost:3000"]`.** mcp-aemps is meant for MCP clients
+  (Claude / Codex / Cursor) calling from backend code or local
+  IPC, not browsers. The previous default leaked a webapp dev
+  assumption into a server that doesn't need it. Set
+  `ALLOWED_ORIGINS` explicitly when fronting from a webapp.
+  `docker-compose.yml` and both READMEs updated to match.
+
+### Fixed
+
+- **`RedisETagStore` failures now log at WARNING (throttled), not
+  DEBUG.** Pre-v0.4.14 a Redis outage silently broke ETag
+  revalidation: every CIMA call re-fetched upstream because the
+  store was dead, but the only log signal was a DEBUG line nobody
+  enables in production. WARNING with a 60-second per-store
+  throttle keeps operators in the loop without flooding logs at
+  request-rate.
+- **stdio version-check task held by a strong reference.**
+  `asyncio` may garbage-collect a task that has no live reference
+  before its body runs. The HTTP lifespan stored the task on
+  `app.state`, but stdio just discarded the return value of
+  `schedule_check`. Now `_run()` keeps a local strong reference
+  for the lifetime of the stdio session.
+
+
 
 Removes the maestras warmup dead code path with empirical evidence,
 makes installers skip-by-default when the target client isn't on the

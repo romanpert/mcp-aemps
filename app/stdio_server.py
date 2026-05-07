@@ -565,10 +565,12 @@ def main() -> None:
         # Fire-and-forget outdated-version check (matches HTTP lifespan
         # behaviour). The MCP host pipes our stderr to its log, so the
         # warning surfaces in Claude Desktop / Codex / VS Code logs.
+        # Keep a local reference: asyncio may GC a task before its
+        # body runs if no strong reference is held.
         from app.config import settings
         from app.version_check import schedule_check
 
-        schedule_check(settings.mcp_aemps_version)
+        _version_task = schedule_check(settings.mcp_aemps_version)  # noqa: F841
         await server.run_stdio_async()
 
     asyncio.run(_run())

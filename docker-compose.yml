@@ -10,7 +10,8 @@ services:
       - "${MCP_AEMPS_PORT:-8765}:8765"
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
+      # CORS origins (empty by default — set when fronting from a browser).
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
       # REDIS_URL: redis://redis:6379/0   # uncomment to enable Redis backend
     volumes:
       - mcp_logs:/app/logs

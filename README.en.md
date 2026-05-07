@@ -162,7 +162,7 @@ All settings via environment variables:
 |----------|---------|-------------|
 | `PORT` | `8765` | Server port (`mcp-aemps up --auto-port` finds free if busy) |
 | `REDIS_URL` | — | Redis or Valkey connection (optional, enables distributed cache + rate limit) |
-| `ALLOWED_ORIGINS` | `http://localhost:3000` | CORS origins (do not use `*` in production) |
+| `ALLOWED_ORIGINS` | *(empty)* | CORS origins. Empty by default — mcp-aemps is meant for MCP clients (Claude / Codex / Cursor) that call from backend code or local IPC, not browsers. Only set this if you front mcp-aemps from a webapp. Do not use `*` in production. |
 | `METRICS_KEY` | — | If set, `/internal/metrics` requires the `X-Metrics-Key` header. Recommended in production. |
 | `LOG_LEVEL` | `INFO` | Logging level |
 | `LOG_RETENTION_DAYS` | `90` | Daily-rotated gzipped log retention |

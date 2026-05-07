@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections import OrderedDict
 from typing import Any, Protocol
 
@@ -41,6 +42,10 @@ DEFAULT_MAX_ENTRIES = 2048
 REDIS_KEY_PREFIX = "mcp-aemps:etag:"
 # CIMA's max-age=1800 + safety margin; revalidation will refresh anyway.
 REDIS_TTL_SECONDS = 3600
+# Throttle for the WARNING that fires when Redis ETag ops fail repeatedly.
+# Without this, a Redis outage produces one log line per CIMA call ≈ tens
+# per second. Once per 60s is enough for a deployer to notice + diagnose.
+_REDIS_FAILURE_LOG_INTERVAL_SECONDS = 60.0
 
 
 class ETagStore(Protocol):
@@ -96,12 +101,36 @@ class RedisETagStore:
 
     def __init__(self, redis: Any):
         self._redis = redis
+        self._last_failure_warned_at: float = 0.0
+
+    def _warn_redis_failure(self, op: str, exc: BaseException) -> None:
+        """Emit a throttled WARNING when Redis is unreachable.
+
+        Pre-v0.4.14 these logged at DEBUG, which masked Redis outages
+        from operators: every CIMA request silently re-fetched
+        upstream because the ETag store was broken, yet the only log
+        signal was a DEBUG line nobody enables in production. WARNING
+        with a 60s throttle keeps the signal visible without spamming.
+        """
+        now = time.monotonic()
+        if now - self._last_failure_warned_at < _REDIS_FAILURE_LOG_INTERVAL_SECONDS:
+            logger.debug("RedisETagStore.%s failed (%s); skipping", op, type(exc).__name__)
+            return
+        self._last_failure_warned_at = now
+        logger.warning(
+            "RedisETagStore.%s failing (%s) — ETag revalidation degraded, "
+            "every CIMA call will re-fetch upstream. Suppressing further "
+            "warnings for %ds.",
+            op,
+            type(exc).__name__,
+            int(_REDIS_FAILURE_LOG_INTERVAL_SECONDS),
+        )
 
     async def get(self, key: str) -> tuple[str, Any] | None:
         try:
             raw = await self._redis.get(REDIS_KEY_PREFIX + key)
         except Exception as exc:  # noqa: BLE001
-            logger.debug("RedisETagStore.get failed (%s); skipping", type(exc).__name__)
+            self._warn_redis_failure("get", exc)
             return None
         if not raw:
             return None
@@ -122,7 +151,7 @@ class RedisETagStore:
         except Exception as exc:  # noqa: BLE001
             # Best-effort: a failed write just means the next request
             # re-fetches from CIMA. Never raise.
-            logger.debug("RedisETagStore.set failed (%s); skipping", type(exc).__name__)
+            self._warn_redis_failure("set", exc)
 
 
 # Module-global singleton. ``cima_client`` reads this at request time;

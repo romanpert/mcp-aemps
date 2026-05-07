@@ -161,8 +161,13 @@ class Settings(BaseSettings):
     log_stacktraces: bool = Field(False, description="Print tracebacks in logs")
 
     allowed_origins: Annotated[List[str], NoDecode] = Field(
-        default_factory=lambda: ["http://localhost:3000"],
-        description="CORS allowed origins",
+        default_factory=list,
+        description=(
+            "CORS allowed origins. Empty by default — the server is not "
+            "intended to be reached from a browser; MCP clients call it "
+            "from server-side code or local IPC. Set explicitly (CSV "
+            "or JSON list) if you front-end mcp-aemps from a webapp."
+        ),
     )
 
     # MCP transport security (DNS rebinding protection on the
