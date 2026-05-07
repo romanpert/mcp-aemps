@@ -25,13 +25,13 @@
       "sizes": ["256x256"]
     }
   ],
-  "version": "0.4.3",
+  "version": "0.4.4",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "mcp-aemps",
-      "version": "0.4.3",
+      "version": "0.4.4",
       "runtimeHint": "uvx",
       "transport": {
         "type": "streamable-http",

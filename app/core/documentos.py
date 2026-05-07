@@ -11,7 +11,6 @@ import app.cima_client as cima
 from app.core.base import OperationError, safe_call
 from app.helpers import (
     _build_metadata,
-    bounded_gather,
     build_dochtml_url,
     format_response,
     normalize_nregistro_and_cn,
@@ -184,17 +183,13 @@ async def _fetch_html_batch(
 async def core_html_ficha_tecnica_multiple(
     *, nregistro: list[str], filename: str = "FichaTecnica.html", ctx: Any = None
 ) -> dict[str, Any]:
-    return await _fetch_html_batch(
-        "ft", nregistro, filename, "Ficha tecnica no encontrada", ctx=ctx
-    )
+    return await _fetch_html_batch("ft", nregistro, filename, "Ficha tecnica no encontrada", ctx=ctx)
 
 
 async def core_html_prospecto_multiple(
     *, nregistro: list[str], filename: str = "Prospecto.html", ctx: Any = None
 ) -> dict[str, Any]:
-    return await _fetch_html_batch(
-        "p", nregistro, filename, "Prospecto no encontrado", ctx=ctx
-    )
+    return await _fetch_html_batch("p", nregistro, filename, "Prospecto no encontrado", ctx=ctx)
 
 
 async def _fetch_html_single(tipo: str, nregistro: str, filename: str, label: str) -> str:

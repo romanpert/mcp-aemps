@@ -25,7 +25,7 @@ Design notes:
 from __future__ import annotations
 
 import logging
-from typing import Any, Awaitable, Callable
+from typing import Awaitable, Callable
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import (
@@ -111,9 +111,7 @@ async def _by_laboratorio(prefix: str) -> list[str]:
 async def _by_principio_activo(prefix: str) -> list[str]:
     if len(prefix) < MIN_PREFIX_LEN:
         return []
-    payload = await core_consultar_maestras(
-        maestra=PRINCIPIOS_ACTIVOS_ID, nombre=prefix, pagina=1
-    )
+    payload = await core_consultar_maestras(maestra=PRINCIPIOS_ACTIVOS_ID, nombre=prefix, pagina=1)
     items = payload.get("resultados") or []
     return [str(it.get("nombre")) for it in items if it.get("nombre")][:MAX_VALUES]
 
@@ -152,9 +150,7 @@ _PROMPT_ARG_SOURCES: dict[str, Callable[[str], Awaitable[list[str]]]] = {
 
 # Resource-template path params keyed by template URI. Adding a new
 # template here is the only place to wire its autocomplete.
-_RESOURCE_TEMPLATE_SOURCES: dict[
-    str, dict[str, Callable[[str], Awaitable[list[str]]]]
-] = {
+_RESOURCE_TEMPLATE_SOURCES: dict[str, dict[str, Callable[[str], Awaitable[list[str]]]]] = {
     "cima://medicamento/{nregistro}": {"nregistro": _by_nregistro},
     "cima://presentacion/{cn}": {"cn": _by_cn},
     "cima://docs/ficha-tecnica/{nregistro}": {"nregistro": _by_nregistro},

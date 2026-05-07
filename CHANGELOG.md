@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] — 2026-05-07
+
+### Fixed
+
+- **Missing runtime dependencies in the published wheel.** `mcp>=1.13.0`
+  (the MCP SDK introduced in v0.2.7) and `pyjwt[crypto]>=2.8.0` (added
+  in v0.2.8 for the OAuth 2.1 Resource-Server) were imported by
+  `app/auth.py` and `app/stdio_server.py` but never declared in
+  `[project.dependencies]` of `pyproject.toml` (or in
+  `requirements.txt`). Users running `pip install mcp-aemps` for the
+  first time on a clean venv between v0.2.7 and v0.4.3 hit
+  `ModuleNotFoundError` on the first request. CI passed locally
+  because the runners had cached prior installs. Both deps now live
+  in both the PEP 621 deps array and the flat requirements file.
+- **Ruff lint residue** from the v0.4.x refactors (unused
+  `typing.Any` import in `app/completions.py`, unused
+  `bounded_gather` after the `progress_gather` switch in
+  `app/core/documentos.py`, two unsorted import blocks). Auto-fixed
+  via `ruff check --fix && ruff format`.
+
+### Workflow
+
+- Added a **Pre-commit checklist** section to `CLAUDE.md` enumerating
+  the `ruff check + ruff format --check + pytest + server.json
+  validate` commands that must pass locally before staging files.
+  Documents the three traps already burned (deps drift, lint residue,
+  Windows cp1252 mojibake) so they don't recur.
+
 ## [0.4.3] — 2026-05-07
 
 ### Fixed

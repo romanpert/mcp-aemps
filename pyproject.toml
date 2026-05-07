@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [project]
 name = "mcp-aemps"
-version = "0.4.3"
+version = "0.4.4"
 description = "Open-source MCP server for the Spanish AEMPS CIMA pharmaceutical registry"
 authors = [
   { name = "Román Pérez Dumpert", email = "roman.p98@gmail.com" }
@@ -35,6 +35,7 @@ dependencies = [
   # Streamable-HTTP app, mounted at /mcp directly. Single FastMCP server
   # serves both stdio and HTTP — tools, prompts, resources and annotations
   # share one source of truth.
+  "mcp>=1.13.0",
   "httpx==0.28.1",
   "uvicorn[standard]==0.35.0",
   "typer==0.17.4",
@@ -43,6 +44,10 @@ dependencies = [
   "limits>=3.10",
   "python-dateutil>=2.9",
   "pydantic-settings>=2.0",
+  # OAuth 2.1 Resource-Server token verification (added in v0.2.8).
+  # python-jose was rejected upstream due to CVE-2024-33663 — pyjwt is
+  # the canonical replacement; do NOT re-introduce python-jose.
+  "pyjwt[crypto]>=2.8.0",
 ]
 
 [project.optional-dependencies]

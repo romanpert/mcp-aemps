@@ -32,6 +32,7 @@ from typing import Any, Sequence
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ContentBlock
 
+from app.completions import register_completions
 from app.content_links import (
     build_search_response,
     links_for_medicamentos,
@@ -93,7 +94,6 @@ from app.mcp_constants import (
     registro_cambios_description,
     vmpp_description,
 )
-from app.completions import register_completions
 from app.prompts import register_prompts
 from app.resources import register_resources
 from app.tool_hooks import HookSet, PostHookFn, PreHookFn, wrap_stdio_tool
@@ -468,9 +468,7 @@ def build_server(
     ) -> CimaCollectionResponse:
         # Item 4: per-nregistro progress so clients render "5/12" while
         # the HTML fanout downloads.
-        return await core_html_ficha_tecnica_multiple(
-            nregistro=nregistro, filename=filename, ctx=ctx
-        )
+        return await core_html_ficha_tecnica_multiple(nregistro=nregistro, filename=filename, ctx=ctx)
 
     @_tool(description=html_p_description)
     @_wrap
@@ -485,9 +483,7 @@ def build_server(
         ctx: Context = None,  # type: ignore[assignment]
     ) -> CimaCollectionResponse:
         # Item 4: per-nregistro progress for the prospecto HTML fanout.
-        return await core_html_prospecto_multiple(
-            nregistro=nregistro, filename=filename, ctx=ctx
-        )
+        return await core_html_prospecto_multiple(nregistro=nregistro, filename=filename, ctx=ctx)
 
     # ------------------------------------------------------------------
     # MCP logging utility — clients can adjust verbosity at runtime via
