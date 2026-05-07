@@ -108,8 +108,8 @@ and MCP Registry submission (github-oidc) — no manual tokens involved.
 
 ### Architectural rules
 
-- **Hard scope rule** (locked 2026-05-07): Community Edition mirrors **CIMA REST API endpoints only**. New MCP tools must be a 1:1 wrapper around an officially-documented CIMA endpoint. Anything else (image processing, PDF extraction, multi-NCA aggregation, snapshot exports, scrapers) belongs in the closed-source `mcp-aemps-enterprise` repo, not here. See `CLAUDE.md` for the rationale.
-- **Quality-only window v0.4.x → v1.0.0.** Improvements until 1.0.0 are efficiency / security / scalability / modularity. New endpoints land **only** if AEMPS publishes them.
+- **Hard scope rule**: this repository mirrors **CIMA REST API endpoints only**. New MCP tools must be a 1:1 wrapper around an officially-documented CIMA endpoint. Anything beyond the documented surface (image processing, PDF extraction, multi-NCA aggregation, snapshot exports, scrapers) is out of scope here. PRs that introduce non-CIMA functionality will be closed without merge.
+- **Quality-only window before v1.0.** Until the v1.0 release, improvements focus on efficiency, security, scalability, and modularity. New endpoints land only if AEMPS publishes them.
 - **Thin routes**: route handlers (`app/routes/*.py`) delegate to `cima_client` + `helpers`. No business logic in route bodies.
 - **Factory-only app instantiation**: never create a `FastAPI()` instance directly outside `app/factory.py`. Downstream consumers extend via `create_app(extra_routers=..., extra_middleware=..., startup_hooks=...)`.
 - **Optional Redis**: code must work without Redis. If you add a Redis-dependent feature, gate it behind `if settings.redis_url`.

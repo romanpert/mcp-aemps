@@ -123,7 +123,7 @@ public doc surface that was lagging recent releases.
 
 ### Audit findings — backlog (not in this release)
 
-Documented in ROADMAP for follow-up. None are security-criticial:
+Documented for follow-up. None are security-critical:
 
 1. **No 429 retry against CIMA upstream.** A single CIMA throttle
    currently propagates as a 5xx to the client. A jittered single
@@ -227,17 +227,6 @@ distinct schema bugs were quietly producing broken installs.
   `descargar_imagenes` hook section in `README.md` ("Tres recetas" →
   "Dos recetas"; matched in `README.en.md`).
 
-### Marketing (out-of-tree, gitignored)
-
-- New Astro 5 + Tailwind landing site scaffolded at
-  `.marketing/site/`. Lives under `.marketing/` so nothing leaks
-  into the public repo. Hero, install tabs, feature grid, tool
-  catalogue grouped by category, `/moxi` reserved page for the
-  Premium tier, SEO meta + OpenGraph + JSON-LD. Single sources of
-  truth at `src/data/installCommands.ts` and `src/data/tools.ts`
-  mirror the canonical README + `_mcp_constants_es.py`. Deploy
-  recipe documented for a separate `romanpert/mcp-aemps-site`
-  repo on GitHub Pages.
 
 ## [0.4.8] — 2026-05-07
 
@@ -312,10 +301,10 @@ distinct schema bugs were quietly producing broken installs.
 
 ### Removed
 
-- README sections referencing `descargar_imagenes` (moved to
-  Premium / enterprise tier — the tool was never first-class CIMA
-  REST and image bytes come from `cima.aemps.es/cima/fotos/...`,
-  outside the documented surface).
+- README sections referencing `descargar_imagenes`. The tool is out of
+  scope for this repository — it was never a first-class CIMA REST
+  endpoint and image bytes come from `cima.aemps.es/cima/fotos/...`,
+  outside the documented surface.
 - Hardcoded `Desde v0.2.11` / `Since v0.2.11` version pins in both
   README locales — the historical pin is meaningless now and stale
   references on the PyPI page confuse readers who expect them to
@@ -356,7 +345,7 @@ until v1.0.0).
   cache init, the active store is swapped via
   `etag_store.set_active_store(RedisETagStore(redis))`. Stdio (no
   FastAPI lifespan) keeps the in-memory default. The abstraction is
-  the seam Premium / enterprise forks can target for non-Redis
+  the extension seam third-party forks can target for non-Redis
   backends (Memcached, Workers KV, …) without touching
   `cima_client.py`.
 
@@ -370,15 +359,15 @@ until v1.0.0).
 
 ### Documented
 
-- **Hard scope rule** locked in `CLAUDE.md` (gitignored): Community
-  Edition mirrors CIMA REST API endpoints only; improvements between
-  v0.4.x and v1.0.0 are quality work (efficiency, security,
-  scalability, modularity for Premium forks). No new tools without a
-  backing CIMA endpoint. `descargar-imagenes` and IPT/IPE PDF
-  extraction stay Premium-only; multi-NCA aggregation belongs in
-  separate `mcp-ema` / `mcp-aifa` packages, not here.
-- **v0.9.0 unlock** noted in ROADMAP: at the v0.9.0 boundary, drop
-  the MINOR-only filter on `docker-mcp-registry.yml` so the auto-PR
+- **Hard scope rule** documented internally: this repository mirrors
+  CIMA REST API endpoints only; improvements until v1.0 are quality
+  work (efficiency, security, scalability, modularity). No new tools
+  without a backing CIMA endpoint. `descargar-imagenes` and IPT/IPE
+  PDF extraction are out of scope. Multi-NCA aggregation (EMA, AIFA,
+  Swissmedic) would belong in separate packages if it ever ships,
+  not here.
+- **Future trigger note**: at the v0.9.0 boundary, drop the
+  MINOR-only filter on `docker-mcp-registry.yml` so the auto-PR
   fires on every patch like the rest of the pipeline.
 
 ## [0.4.5] — 2026-05-07
@@ -522,8 +511,8 @@ the gap by firing the full pipeline via `push: tags:` again.
 
 Anthropic MCP best-practices 2026-Q2 alignment. Skipped `0.3.0` to mark
 the breadth of changes — every additive feature flagged by the audit
-landed except resource subscriptions, which is held back as a candidate
-for the premium / enterprise tier.
+landed except resource subscriptions, which is deferred to a future
+release.
 
 ### Added
 
@@ -610,9 +599,8 @@ for the premium / enterprise tier.
 ### Out of scope (deferred / rejected)
 
 - **Resource subscriptions + `notifications/resources/updated`** —
-  candidate for the premium / enterprise tier. Real value (push
-  pharmacovigilance alerts) but introduces a long-running background
-  task; revisited in a separate release.
+  deferred. Real value (push pharmacovigilance alerts) but introduces
+  a long-running background task; revisited in a future release.
 
 ## [0.2.11] — 2026-05-06
 
@@ -831,8 +819,8 @@ for the premium / enterprise tier.
 
   Beneficios:
   * **Streaming**: HTML completo de FT/Prospecto fluye al cliente sin
-    pasar por una llamada a tool — addresses ROADMAP "Beyond 1.0" item
-    #1 (streaming responses for large HTML / leaflet downloads).
+    pasar por una llamada a tool (streaming responses for large HTML /
+    leaflet downloads).
   * **Cacheabilidad**: las maestras (ATC, principios activos,
     laboratorios) cambian raramente. Exponerlas como URIs estáticas
     permite a los clientes cachearlas indefinidamente y elimina el
@@ -1016,11 +1004,10 @@ for the premium / enterprise tier.
   `asyncio.Lock`. The wrapper does not await between read and write,
   so the lock only added contention. Behaviour identical, fewer
   context switches on hot paths.
-- Documentation cleanup: removed all "Enterprise edition", "Full
-  edition", "Community Edition" wording from README, SECURITY,
-  CONTRIBUTING, CHANGELOG, ROADMAP, code docstrings and issue
-  templates. The repository ships the open-source server only;
-  downstream consumers extend via the existing factory hooks.
+- Documentation cleanup pass across README, SECURITY, CONTRIBUTING,
+  CHANGELOG, code docstrings and issue templates. The repository
+  ships the open-source server only; downstream consumers extend via
+  the existing factory hooks.
 - `SECURITY.md` supported versions bumped to 0.2.x.
 - README configuration table updated: documents Redis/Valkey support,
   `METRICS_KEY`, `LOG_RETENTION_DAYS`, `MAX_RESULTS`.
@@ -1174,7 +1161,6 @@ for the premium / enterprise tier.
   host:port to a per-user state file (`~/.local/state/mcp-aemps/runtime.json`
   or per-OS equivalent). `mcp-aemps install` reads it automatically — change
   the port without re-installing clients.
-- **`.marketing/` directory** (gitignored) — scaffold for launch material.
 - 32 tests total (was 19) covering all 6 installers and runtime state.
 
 ### Changed

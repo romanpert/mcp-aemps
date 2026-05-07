@@ -59,9 +59,8 @@ disclosure is preferred — typical timeline:
 - Misuse of the data downstream — clinical decisions made on the basis
   of CIMA data are the integrator's responsibility. Patient-facing
   prompts ship a "no medical advice" disclaimer (covered by CI).
-- Vulnerabilities in user-installed Premium / enterprise extensions
-  (`mcp-aemps-enterprise`, MOXI). They live in separate repos and
-  have their own SECURITY.md.
+- Vulnerabilities in third-party extensions or forks of this server.
+  They are out of scope for this repository's security policy.
 
 ## Authentication & authorization (v0.2.8+)
 

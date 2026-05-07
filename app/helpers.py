@@ -74,6 +74,30 @@ def _truncate(s: Optional[str], limit: int = MAX_LOG_BODY) -> str:
 
 
 def format_response(resultado: Any, metadatos: Dict[str, Any], fanout: bool = False) -> Any:
+    """Merge a CIMA payload with the per-request metadata block.
+
+    Return shape varies by input type — dict / list / wrapped dict.
+    The 2026-Q2 audit flagged the convoluted polymorphism as a
+    refactor candidate, but the re-evaluation in v0.4.12 closed it as
+    "do not refactor" for these reasons (record-of-decision so the next
+    audit pass doesn't reopen the same conversation):
+
+    - The user-facing contract is already abstracted via the Pydantic
+      response envelopes in ``app/core/schemas.py`` (``CimaResponse`` /
+      ``CimaPaginatedResponse`` / ``CimaCollectionResponse``). External
+      consumers see a stable schema regardless of what this helper
+      does internally.
+    - Refactoring would touch every ``core_<op>`` (15+ functions) and
+      their tests with no observable user-facing benefit beyond
+      aesthetics.
+    - The merge logic is non-trivial — replacing it risks subtle
+      payload-shape regressions that the existing test suite covers
+      indirectly (via the route + tool tests) but doesn't pin
+      explicitly.
+
+    Reopen this only if a concrete bug is traced to merge confusion or
+    a new feature genuinely can't fit the current shape.
+    """
     if resultado is None:
         return {"data": None, **metadatos}
 
