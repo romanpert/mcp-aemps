@@ -1,27 +1,18 @@
 name: npm
 
 # Publishes the npm wrapper at npm/ to the npmjs.com registry.
-# Triggered on every release tag (vX.Y.Z).
+# Triggered on every release tag (vX.Y.Z) and via manual dispatch.
 #
-# Auth: npm OIDC Trusted Publisher (no NPM_TOKEN secret). Requires the
-# corresponding configuration on npmjs.com side — without it, every
-# publish fails with ENEEDAUTH. Setup checklist (one-time):
-#
-#   1. Sign in to https://www.npmjs.com/ as the package owner.
-#   2. Go to https://www.npmjs.com/package/mcp-aemps/access
-#      → tab "Provenance and Trusted Publishers"
-#      → click "Add Trusted Publisher".
-#   3. Provider:    GitHub Actions
-#      Organization or user: romanpert
-#      Repository:  mcp-aemps
-#      Workflow filename:    npm.yml      (just the filename)
-#      Environment: (leave empty)
-#   4. Save.
-#
-# After configuration, OIDC works for `push: tags:` and `pull_request`
-# events. npm explicitly rejects `workflow_dispatch` and
-# `repository_dispatch` for trusted publishing — manual re-firing is
-# only possible by tagging a new release.
+# Auth: classic Granular Access Token stored as repo secret NPM_TOKEN
+# (scoped to mcp-aemps only, publish permission). The OIDC Trusted
+# Publisher path was attempted earlier but never produced a successful
+# publish (npmjs.com only ever had v0.2.0 on disk; every release since
+# silently failed with ENEEDAUTH because the empty NODE_AUTH_TOKEN
+# short-circuited the OIDC handshake on npm CLI). Classic auth works
+# for both `push: tags:` and `workflow_dispatch`, with no Trusted
+# Publisher setup required on npmjs side. Provenance is still emitted
+# (--provenance is independent from the auth method as long as
+# id-token: write is granted).
 
 on:
   push:
@@ -67,12 +58,8 @@ jobs:
           npm pack --dry-run
           node bin/mcp-aemps.js --help || true   # smoke: file is executable
 
-      - name: Publish (Trusted Publisher / OIDC)
+      - name: Publish
         working-directory: npm
-        # No NODE_AUTH_TOKEN env: with id-token:write + setup-node's
-        # registry-url + a Trusted Publisher configured on npmjs (see the
-        # header comment), npm CLI fetches its own publish token via
-        # OIDC. Setting NODE_AUTH_TOKEN to an empty string (the previous
-        # behaviour, when NPM_TOKEN secret was unset) made npm skip the
-        # OIDC handshake and fail with ENEEDAUTH.
         run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

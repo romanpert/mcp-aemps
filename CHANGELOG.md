@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] — 2026-05-07
+
+### Fixed
+
+- **npm publish — classic NPM_TOKEN auth restored.** Every release
+  since v0.2.1 silently failed to publish to npmjs.com because the
+  workflow's `env: NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}` line
+  resolved to an empty string when `NPM_TOKEN` was unset, which
+  short-circuited npm CLI's OIDC fallback (it sees the empty token,
+  treats it as "auth already provided", fails with `ENEEDAUTH`). The
+  npmjs.com side was also missing the Trusted Publisher configuration.
+  Decision: switch to a classic Granular Access Token (scoped to
+  `mcp-aemps` only, publish permission), stored as repo secret
+  `NPM_TOKEN`. Works for both push-tag and workflow_dispatch events,
+  no Trusted Publisher setup required, provenance is still emitted
+  via `id-token: write`.
+- All releases v0.2.1 → v0.4.2 are still on PyPI / MCP Registry / GHCR
+  / GitHub Releases as expected; only npm metadata was stale at
+  v0.2.0. The npm wrapper at any version pulls PyPI `latest` at
+  runtime, so users were not functionally affected — but the npm
+  package version now catches up to 0.4.3 for parity.
+
 ## [0.4.2] — 2026-05-07
 
 ### Changed
