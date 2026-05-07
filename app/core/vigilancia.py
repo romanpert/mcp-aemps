@@ -14,6 +14,7 @@ from app.helpers import (
     _build_metadata,
     bounded_gather,
     format_response,
+    progress_gather,
 )
 
 logger = logging.getLogger("mcp.aemps")
@@ -154,9 +155,11 @@ async def core_problemas_suministro_dcpf(*, cod_dcpf: str) -> dict[str, Any]:
     return format_response(resultado, _build_metadata({"cod_dcpf": cod_dcpf}, API_PSUM_VERSION))
 
 
-async def _fetch_notas_batch(registros: list[str]) -> tuple[dict[str, Any], dict[str, str]]:
+async def _fetch_notas_batch(
+    registros: list[str], *, ctx: Any = None
+) -> tuple[dict[str, Any], dict[str, str]]:
     tasks = [safe_call(cima.notas, nregistro=nr) for nr in registros]
-    responses = await bounded_gather(tasks)
+    responses = await progress_gather(tasks, ctx=ctx, label="notas")
     resultados: dict[str, Any] = {}
     errores: dict[str, str] = {}
     for nr, resp in zip(registros, responses):
@@ -169,10 +172,10 @@ async def _fetch_notas_batch(registros: list[str]) -> tuple[dict[str, Any], dict
     return resultados, errores
 
 
-async def core_listar_notas(*, nregistro: list[str]) -> dict[str, Any]:
+async def core_listar_notas(*, nregistro: list[str], ctx: Any = None) -> dict[str, Any]:
     if not nregistro:
         raise OperationError(400, error="Sin parametros", message="Se requiere al menos un 'nregistro'.")
-    resultados, errores = await _fetch_notas_batch(nregistro)
+    resultados, errores = await _fetch_notas_batch(nregistro, ctx=ctx)
     if not resultados:
         raise OperationError(
             404,
@@ -201,11 +204,11 @@ async def core_obtener_notas(*, nregistros: list[str]) -> dict[str, Any]:
     )
 
 
-async def core_listar_materiales(*, nregistro: list[str]) -> dict[str, Any]:
+async def core_listar_materiales(*, nregistro: list[str], ctx: Any = None) -> dict[str, Any]:
     if not nregistro:
         raise OperationError(400, error="Sin parametros", message="Se requiere al menos un 'nregistro'.")
     tareas = [safe_call(cima.materiales, nregistro=nr) for nr in nregistro]
-    respuestas = await bounded_gather(tareas)
+    respuestas = await progress_gather(tareas, ctx=ctx, label="materiales")
     data = [res for res in respuestas if not isinstance(res, Exception) and res]
     if not data:
         raise OperationError(

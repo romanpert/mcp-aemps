@@ -176,6 +176,71 @@ async def bounded_gather(coros: list, *, limit: int | None = None, return_except
     return await asyncio.gather(*(_wrap(c) for c in coros), return_exceptions=return_exceptions)
 
 
+async def progress_gather(
+    coros: list,
+    *,
+    ctx: Any = None,
+    label: str = "items",
+    limit: int | None = None,
+    return_exceptions: bool = True,
+) -> list:
+    """``bounded_gather`` + ``notifications/progress`` per completed item.
+
+    Spec ref: server/utilities/progress (v0.3.0 batch 4 item 4). When
+    ``ctx`` is a FastMCP ``Context`` carrying a progressToken from the
+    client, every coroutine completion fires
+    ``ctx.report_progress(done, total, message)`` so hosts render
+    "page 3/12". When ``ctx`` is ``None`` (e.g. HTTP transport, tests)
+    this degrades gracefully to plain ``bounded_gather`` semantics.
+
+    Returns results in the same order as ``coros``, identical to
+    ``asyncio.gather`` — concurrent completion does not reorder the
+    output list.
+    """
+    total = len(coros)
+    if total == 0:
+        return []
+    if ctx is None:
+        return await bounded_gather(coros, limit=limit, return_exceptions=return_exceptions)
+
+    if limit is None:
+        from app.rate_limits import BATCH_FANOUT_LIMIT
+
+        limit = BATCH_FANOUT_LIMIT
+
+    sem = asyncio.Semaphore(limit)
+    results: list[Any] = [None] * total
+    completed = 0
+
+    # Send a starting tick so clients render the progress UI immediately
+    # rather than waiting for the first item to finish.
+    try:
+        await ctx.report_progress(0, total, f"{label}: 0/{total}")
+    except Exception:
+        pass
+
+    async def _wrap(idx: int, coro):
+        nonlocal completed
+        async with sem:
+            try:
+                results[idx] = await coro
+            except Exception as exc:  # noqa: BLE001
+                if return_exceptions:
+                    results[idx] = exc
+                else:
+                    raise
+        completed += 1
+        try:
+            await ctx.report_progress(completed, total, f"{label}: {completed}/{total}")
+        except Exception:
+            # Progress is best-effort; never let a notification failure
+            # bring down the actual operation.
+            pass
+
+    await asyncio.gather(*(_wrap(i, c) for i, c in enumerate(coros)), return_exceptions=False)
+    return results
+
+
 async def safe_cima_call(func, *args, **kwargs) -> Any:
     """Wrapper seguro para llamadas a CIMA con manejo robusto de errores."""
     try:

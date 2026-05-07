@@ -15,6 +15,7 @@ from app.helpers import (
     build_dochtml_url,
     format_response,
     normalize_nregistro_and_cn,
+    progress_gather,
 )
 
 logger = logging.getLogger("mcp.aemps")
@@ -137,6 +138,8 @@ async def _fetch_html_batch(
     nregistro: list[str],
     filename: str,
     not_found_label: str,
+    *,
+    ctx: Any = None,
 ) -> dict[str, Any]:
     if not nregistro or not filename:
         raise OperationError(
@@ -146,7 +149,8 @@ async def _fetch_html_batch(
         )
 
     tasks = [cima.get_html_bytes(tipo=tipo, nregistro=nr, filename=filename) for nr in nregistro]
-    responses = await bounded_gather(tasks)
+    label = f"{tipo}-html"
+    responses = await progress_gather(tasks, ctx=ctx, label=label)
 
     data_map: dict[str, str] = {}
     errors: dict[str, str] = {}
@@ -178,15 +182,19 @@ async def _fetch_html_batch(
 
 
 async def core_html_ficha_tecnica_multiple(
-    *, nregistro: list[str], filename: str = "FichaTecnica.html"
+    *, nregistro: list[str], filename: str = "FichaTecnica.html", ctx: Any = None
 ) -> dict[str, Any]:
-    return await _fetch_html_batch("ft", nregistro, filename, "Ficha tecnica no encontrada")
+    return await _fetch_html_batch(
+        "ft", nregistro, filename, "Ficha tecnica no encontrada", ctx=ctx
+    )
 
 
 async def core_html_prospecto_multiple(
-    *, nregistro: list[str], filename: str = "Prospecto.html"
+    *, nregistro: list[str], filename: str = "Prospecto.html", ctx: Any = None
 ) -> dict[str, Any]:
-    return await _fetch_html_batch("p", nregistro, filename, "Prospecto no encontrado")
+    return await _fetch_html_batch(
+        "p", nregistro, filename, "Prospecto no encontrado", ctx=ctx
+    )
 
 
 async def _fetch_html_single(tipo: str, nregistro: str, filename: str, label: str) -> str:

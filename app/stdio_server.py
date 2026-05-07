@@ -29,7 +29,7 @@ import asyncio
 import logging
 from typing import Any, Sequence
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ContentBlock
 
 from app.content_links import (
@@ -93,6 +93,7 @@ from app.mcp_constants import (
     registro_cambios_description,
     vmpp_description,
 )
+from app.completions import register_completions
 from app.prompts import register_prompts
 from app.resources import register_resources
 from app.tool_hooks import HookSet, PostHookFn, PreHookFn, wrap_stdio_tool
@@ -371,10 +372,16 @@ def build_server(
 
     @_tool(description=listar_notas_description)
     @_wrap
-    async def listar_notas(nregistro: list[str]) -> list[ContentBlock]:
+    async def listar_notas(
+        nregistro: list[str],
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> list[ContentBlock]:
         # Item 7b: emit ResourceLinks for each nregistro that returned
         # at least one nota.
-        payload = await core_listar_notas(nregistro=nregistro)
+        # Item 4: ctx threads through to progress_gather inside the core
+        # so clients with a progressToken see one /progress notification
+        # per completed nregistro.
+        payload = await core_listar_notas(nregistro=nregistro, ctx=ctx)
         notas = payload.get("notas") if isinstance(payload, dict) else None
         keys = list(notas.keys()) if isinstance(notas, dict) else []
         links = links_from_keys(keys, medicamento_link)
@@ -387,11 +394,15 @@ def build_server(
 
     @_tool(description=listar_materiales_description)
     @_wrap
-    async def listar_materiales(nregistro: list[str]) -> list[ContentBlock]:
+    async def listar_materiales(
+        nregistro: list[str],
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> list[ContentBlock]:
         # Item 7b: emit ResourceLinks for each input nregistro. The core
         # returns a flat list of materiales without per-medicamento keys,
         # so we use the requested nregistros as the link source.
-        payload = await core_listar_materiales(nregistro=nregistro)
+        # Item 4: ctx threaded through for per-nregistro progress.
+        payload = await core_listar_materiales(nregistro=nregistro, ctx=ctx)
         links = links_from_keys(nregistro, medicamento_link)
         return build_search_response(payload, links)
 
@@ -420,7 +431,17 @@ def build_server(
         cn: str | None = None,
         seccion: str | None = None,
         format: str = "json",
-    ) -> Any:
+    ) -> list[ContentBlock]:
+        # Item 1c (v0.3.0 batch 4): normalise to list[ContentBlock] so
+        # FastMCP emits an outputSchema (closes the 21/21 gap from
+        # batch 3). The LLM-visible payload is preserved: format=json
+        # surfaces the full envelope as JSON; format=html/txt surfaces
+        # the raw body without the dict wrapper. HTTP transport keeps
+        # returning ``Response(content, media_type=...)`` separately.
+        import json as _json
+
+        from mcp.types import TextContent
+
         result = await core_doc_contenido(
             tipo_doc=tipo_doc,
             nregistro=nregistro,
@@ -428,10 +449,10 @@ def build_server(
             seccion=seccion,
             format=format,
         )
-        # html / txt → return raw content; json → return the dict.
         if format != "json" and isinstance(result, dict) and "content" in result:
-            return result["content"]
-        return result
+            body = result["content"] or ""
+            return [TextContent(type="text", text=str(body))]
+        return [TextContent(type="text", text=_json.dumps(result, ensure_ascii=False, default=str))]
 
     @_tool(description=html_ft_description)
     @_wrap
@@ -441,9 +462,15 @@ def build_server(
     @_tool(description=html_ft_multiple_description)
     @_wrap
     async def html_ficha_tecnica_multiple(
-        nregistro: list[str], filename: str = "FichaTecnica.html"
+        nregistro: list[str],
+        filename: str = "FichaTecnica.html",
+        ctx: Context = None,  # type: ignore[assignment]
     ) -> CimaCollectionResponse:
-        return await core_html_ficha_tecnica_multiple(nregistro=nregistro, filename=filename)
+        # Item 4: per-nregistro progress so clients render "5/12" while
+        # the HTML fanout downloads.
+        return await core_html_ficha_tecnica_multiple(
+            nregistro=nregistro, filename=filename, ctx=ctx
+        )
 
     @_tool(description=html_p_description)
     @_wrap
@@ -453,9 +480,14 @@ def build_server(
     @_tool(description=html_p_multiple_description)
     @_wrap
     async def html_prospecto_multiple(
-        nregistro: list[str], filename: str = "Prospecto.html"
+        nregistro: list[str],
+        filename: str = "Prospecto.html",
+        ctx: Context = None,  # type: ignore[assignment]
     ) -> CimaCollectionResponse:
-        return await core_html_prospecto_multiple(nregistro=nregistro, filename=filename)
+        # Item 4: per-nregistro progress for the prospecto HTML fanout.
+        return await core_html_prospecto_multiple(
+            nregistro=nregistro, filename=filename, ctx=ctx
+        )
 
     # ------------------------------------------------------------------
     # MCP logging utility — clients can adjust verbosity at runtime via
@@ -483,6 +515,13 @@ def build_server(
     # cacheable maestras. See app/resources.py for the full catalogue.
     # ------------------------------------------------------------------
     register_resources(server)
+
+    # ------------------------------------------------------------------
+    # MCP completion/complete — autocomplete for prompt args and
+    # resource-template params (v0.3.0 batch 4 item 3). See
+    # app/completions.py for the catalogue and source helpers.
+    # ------------------------------------------------------------------
+    register_completions(server)
 
     return server
 

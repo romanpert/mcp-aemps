@@ -65,18 +65,15 @@ def test_every_tool_input_schema_is_json_schema() -> None:
         assert "properties" in schema, f"{t.name}: schema has no properties"
 
 
-def test_most_tools_expose_a_typed_output_schema() -> None:
+def test_every_tool_exposes_an_output_schema() -> None:
     """Spec server/tools §"Output Schema" — code-mode hosts generate typed
-    client APIs from outputSchema. Most CIMA tools expose a typed
-    Pydantic envelope; the documented exceptions are:
+    client APIs from outputSchema. As of v0.3.0 batch 4 every CIMA tool
+    exposes a non-empty outputSchema:
 
-    * ``doc_contenido`` — return shape is ``dict | str`` depending on
-      ``format`` (json vs html/txt), an intentional Union we can't
-      usefully constrain.
-    * ``buscar_medicamentos``, ``listar_presentaciones``,
-      ``listar_notas``, ``listar_materiales``, ``problemas_suministro``
-      — emit ``ResourceLink`` ContentBlocks (item 7b), so they return a
-      ``list[ContentBlock]`` instead of a typed envelope.
+    * Single-item / fan-out tools: typed Pydantic envelope
+      (CimaResponse / CimaPaginatedResponse / CimaCollectionResponse).
+    * Search tools (item 7b) and ``doc_contenido`` (item 1c) — return
+      ``list[ContentBlock]`` so FastMCP auto-wraps the schema.
     * ``html_ficha_tecnica`` / ``html_prospecto`` — return raw HTML
       strings; FastMCP auto-wraps with ``{result: str}``.
     """
@@ -84,9 +81,7 @@ def test_most_tools_expose_a_typed_output_schema() -> None:
 
     tools = asyncio.run(build_server().list_tools())
     no_schema = [t.name for t in tools if not t.outputSchema]
-    assert no_schema == ["doc_contenido"], (
-        f"unexpected tools without outputSchema: {no_schema}"
-    )
+    assert not no_schema, f"tools without outputSchema: {no_schema}"
 
     typed_envelope_titles = {
         "CimaResponse",
@@ -182,6 +177,135 @@ def test_every_tool_has_a_localised_title() -> None:
     tools = asyncio.run(build_server().list_tools())
     missing = [t.name for t in tools if not (t.title or "").strip()]
     assert not missing, f"tools missing localised title: {missing}"
+
+
+def test_progress_gather_emits_per_item_notifications() -> None:
+    """Item 4: progress_gather() must call ctx.report_progress for each
+    completed task plus a leading 0/N tick. With ctx=None it degrades to
+    plain bounded_gather. Order of results matches input order regardless
+    of completion order."""
+    from unittest.mock import AsyncMock
+
+    from app.helpers import progress_gather
+
+    async def mk(value):
+        return value
+
+    async def go():
+        ctx = AsyncMock()
+        ctx.report_progress = AsyncMock()
+        results = await progress_gather(
+            [mk(1), mk(2), mk(3)], ctx=ctx, label="items"
+        )
+        return results, ctx
+
+    results, ctx = asyncio.run(go())
+    assert results == [1, 2, 3], "results must preserve input order"
+    # 1 leading 0/N tick + 3 per-item ticks = 4 calls.
+    assert ctx.report_progress.await_count == 4, (
+        f"expected 4 progress notifications, got {ctx.report_progress.await_count}"
+    )
+    first_call = ctx.report_progress.await_args_list[0].args
+    last_call = ctx.report_progress.await_args_list[-1].args
+    assert first_call[0] == 0 and first_call[1] == 3, "leading tick must be 0/N"
+    assert last_call[0] == 3 and last_call[1] == 3, "final tick must be N/N"
+
+
+def test_progress_gather_without_ctx_falls_back_to_bounded_gather() -> None:
+    """progress_gather(..., ctx=None) is a drop-in for bounded_gather: same
+    return shape, no notifications attempted."""
+    from app.helpers import progress_gather
+
+    async def mk(value):
+        return value
+
+    async def go():
+        return await progress_gather([mk("a"), mk("b")], ctx=None, label="x")
+
+    assert asyncio.run(go()) == ["a", "b"]
+
+
+def test_completion_capability_is_advertised() -> None:
+    """Spec server/utilities/completion: clients negotiate this capability
+    on initialize. Must show up in the capabilities block once a handler
+    is registered."""
+    from mcp.server.lowlevel import NotificationOptions
+    from mcp.types import CompleteRequest
+
+    from app.stdio_server import build_server
+
+    server = build_server()
+    assert CompleteRequest in server._mcp_server.request_handlers, (
+        "completion/complete handler must be registered on the lowlevel server"
+    )
+    caps = server._mcp_server.get_capabilities(
+        notification_options=NotificationOptions(),
+        experimental_capabilities={},
+    )
+    assert caps.completions is not None, "completions capability must be advertised"
+
+
+def test_completions_route_prompt_args_and_template_params() -> None:
+    """Item 3 routing — argument names map to the CIMA-backed source.
+    Mocks the upstream call so the test stays offline; verifies the
+    prefix lookup is used for both PromptReference and
+    ResourceTemplateReference paths and that unknown args / short
+    prefixes return no suggestions."""
+    from unittest.mock import AsyncMock, patch
+
+    from mcp.types import (
+        CompletionArgument,
+        PromptReference,
+        ResourceTemplateReference,
+    )
+
+    from app.completions import _suggest
+
+    mock_payload = {
+        "resultados": [
+            {"nregistro": "12345"},
+            {"nregistro": "12346"},
+            {"nregistro": "99999"},
+        ],
+    }
+
+    async def go():
+        with patch(
+            "app.completions.core_buscar_medicamentos",
+            AsyncMock(return_value=mock_payload),
+        ):
+            tpl_ref = ResourceTemplateReference(
+                type="ref/resource", uri="cima://medicamento/{nregistro}"
+            )
+            tpl_values = await _suggest(
+                tpl_ref, CompletionArgument(name="nregistro", value="123")
+            )
+            prompt_ref = PromptReference(
+                type="ref/prompt", name="equivalencias_genericas"
+            )
+            prompt_values = await _suggest(
+                prompt_ref, CompletionArgument(name="nregistro", value="12")
+            )
+            short = await _suggest(
+                prompt_ref, CompletionArgument(name="nregistro", value="1")
+            )
+            unknown_arg = await _suggest(
+                prompt_ref, CompletionArgument(name="unknown_arg", value="abc")
+            )
+            unknown_template = await _suggest(
+                ResourceTemplateReference(
+                    type="ref/resource", uri="cima://nonexistent/{x}"
+                ),
+                CompletionArgument(name="x", value="abc"),
+            )
+            return tpl_values, prompt_values, short, unknown_arg, unknown_template
+
+    tpl, prompt, short, unknown_arg, unknown_template = asyncio.run(go())
+    assert tpl == ["12345", "12346", "99999"]
+    assert prompt == ["12345", "12346", "99999"]
+    assert short == [], "prefix shorter than MIN_PREFIX_LEN must skip upstream"
+    assert unknown_arg == []
+    assert unknown_template == []
 
 
 def test_logging_set_level_capability_is_advertised() -> None:
