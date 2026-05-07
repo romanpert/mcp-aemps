@@ -75,54 +75,19 @@ OAuth 2.1 Resource-Server mode is **opt-in**:
   / Keycloak / Hydra. RFC 9728 Protected Resource Metadata is exposed
   at `/.well-known/oauth-protected-resource` so DCR-aware clients
   discover the AS automatically.
-- JWT validation uses `pyjwt[crypto]`. We never re-introduced
-  `python-jose` (CVE-2024-33663) — covered by a hard rule in
-  `CLAUDE.md`.
+- JWT validation uses `pyjwt[crypto]` with an asymmetric-only
+  algorithm whitelist and required-claim enforcement. We never
+  re-introduced `python-jose` (CVE-2024-33663) — covered by a hard
+  rule in `CLAUDE.md`.
 - Stdio transport is **never** gated by OAuth — the spawn is local to
   the host process; access control is whatever the host enforces.
 
-### JWT algorithm whitelist (audited 2026-05-07)
-
-The token verifier (`app/auth.py:90-98`) calls `jwt.decode` with an
-explicit, hard-coded algorithm whitelist:
-
-```python
-algorithms = ["RS256", "RS384", "RS512", "ES256", "ES384"]
-```
-
-`HS256` and other symmetric algorithms are **not** accepted, which
-prevents the classic "alg confusion" attack (where an attacker
-replays an asymmetric public key as an HMAC secret). `none` is also
-rejected — pyjwt enforces signature presence when `algorithms` is
-non-empty. Required claims (`exp`, `iat`, `aud`) are enforced via
-`options={"require": [...]}`. If `OAUTH_ISSUER` is set, `iss` is
-also validated.
-
-Audit your Authorization Server emits tokens with one of these
-algorithms; if it emits `EdDSA` / `PS256` etc., open an issue and
-we'll evaluate widening the list.
-
-### Anonymous mode + bind host (acceptable residual risk)
-
-When `OAUTH_ENABLED=false` (the default), every HTTP client that can
-reach the listening port can call MCP tools without authentication.
-The default `uvicorn_host` is `0.0.0.0` (bind to all interfaces) so
-the CLI examples (`mcp-aemps up`) work behind reverse proxies
-without extra config.
-
-This is **acceptable residual risk** because the data plane is
-read-only public CIMA data — no PII, no patient context, no write
-methods. But it is a footgun on a multi-tenant or untrusted network:
-
-- **Single-user dev / loopback only**: bind to `127.0.0.1` explicitly
-  (`mcp-aemps up --host 127.0.0.1`) so only local processes can
-  reach the port.
-- **Office LAN / cloud VPC with untrusted neighbours**: enable
-  `OAUTH_ENABLED=true` (audience-bound JWT) **or** restrict access
-  via firewall / security group / reverse-proxy `allow` rules.
-- **Public internet**: always enable both OAuth and DNS rebinding
-  protection. mcp-aemps was not designed to face the open internet
-  unauthenticated.
+When `OAUTH_ENABLED=false` (the default), the data plane is open to
+any client that can reach the listening port. CIMA data is public
+read-only metadata, but you should still restrict reachability via
+network policy (firewall, VPC security group, reverse-proxy allow
+rules, or loopback-only bind) when the listener is exposed to
+untrusted neighbours. See the hardening checklist below.
 
 ## Transport security (v0.4.5+)
 
@@ -210,34 +175,6 @@ suggest.
   the docker/mcp-registry fork. Only fires on MINOR releases (v0.x.0)
   to avoid review noise.
 
-## /internal/metrics token management (audited 2026-05-07)
-
-The metrics endpoint protects access via `X-Metrics-Key` matched
-against the `METRICS_KEY` env var (`app/factory.py:212-219`). The
-comparison is plain string equality, but the endpoint is rate-limited
-on the `local` tier (500/min) — brute-forcing a long random key in
-that budget is impractical.
-
-What the endpoint exposes: aggregate request counters keyed by path,
-HTTP-status histograms, in-flight count, and process uptime. **No
-secrets, no tokens, no PII** — the data is operational, not
-sensitive. Even a leaked `METRICS_KEY` does not compromise medicine
-data, OAuth tokens, or any other asset.
-
-What the endpoint does **not** provide: token rotation. The same
-static `METRICS_KEY` remains valid until you change the env var and
-restart. Treat it as a long-lived secret:
-
-- Generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
-- Rotate annually, or immediately on suspected leak.
-- For multi-tenant production scrapers, prefer fronting `/internal/metrics`
-  behind a reverse proxy that does its own (short-lived) auth, and
-  treat the static key as a defense-in-depth fallback.
-- Loud warning is logged on startup if `METRICS_KEY` is unset
-  (`app/factory.py:236-240`); the endpoint stays public-readable in
-  that case, which is fine for single-tenant dev but should never
-  reach production.
-
 ## Hardening checklist for production deployments
 
 - [ ] Set `ALLOWED_ORIGINS` to your real frontends (never `*` in prod).
@@ -253,29 +190,22 @@ restart. Treat it as a long-lived secret:
 - [ ] Set `LOG_LEVEL=INFO` (not DEBUG) and ship logs to a SIEM. The
       Claude Code hook recipes in the README work for this.
 - [ ] Use the Docker image with the non-root user (UID 10001).
-- [ ] Bind explicitly to `127.0.0.1` if loopback-only
-      (`--host 127.0.0.1`) — anonymous mode + `0.0.0.0` is fine in
-      single-user dev but exposes the listener to LAN neighbours
-      otherwise.
-
-## Threat model audit log
-
-Every minor release ships with an end-to-end review of this file's
-claims against the running code. The most recent pass:
-
-- **2026-05-07 (v0.4.15)** — STRIDE walk over the running v0.4.15
-  surface. Findings: 0 P0, 1 P1 (JWT alg whitelist confirmed sound;
-  documented above), 2 P2 (metrics token rotation guidance + DNS
-  rebinding default-off rationale; both documented). Already
-  mitigated: token leak in OAuth errors, CIMA URL injection, path
-  traversal in HTML downloads, secrets in `safe_dump`, CORS,
-  rate-limit bypass via HTTP method override, predictable
-  correlation IDs, Docker non-root, GitHub Actions OIDC scope.
-  Acceptable residual: anonymous mode on `0.0.0.0` (documented
-  above with mitigation guidance per deployment topology).
+- [ ] Bind explicitly to a loopback or private interface when the
+      listener should not be reachable from untrusted networks
+      (`--host 127.0.0.1`).
+- [ ] Rotate `METRICS_KEY` and any OAuth client credentials on the
+      schedule your compliance regime requires.
 - [ ] Set `MCP_AEMPS_SKIP_UPDATE_CHECK=1` in air-gapped deployments
       (no outbound to PyPI). Keep it unset in normal deployments —
       the WARNING surfaces when CVE patches land.
 - [ ] If you need distributed tracing, plug an OTel exporter via the
       factory's `extra_middleware` / `startup_hooks` extension points.
       The default build does not bundle OTel — keep deps minimal.
+
+## Audit cadence
+
+Every minor release is preceded by an internal end-to-end review of
+this policy against the running code. Findings that result in
+public-facing changes show up in `CHANGELOG.md` under the
+`### Security` heading; internal hardening backlog is tracked
+privately and rolled into the pre-1.0 milestone.
