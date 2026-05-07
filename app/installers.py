@@ -113,7 +113,13 @@ def _client_not_detected_skip(
 
     Default behaviour now: if the client isn't detected, **skip** with
     an explanatory message + install hint. Caller can override with
-    ``force=True`` for provisioning scripts that want to pre-stage."""
+    ``force=True`` for provisioning scripts that want to pre-stage.
+
+    Each ``install_*`` also short-circuits the detection check when an
+    explicit ``config_path`` is passed — that signals the caller knows
+    where they want the file written (tests, IaC, dotfile repos), so
+    we don't second-guess them with a detection probe that might fail
+    on a CI runner where no IDE is installed."""
     if any(d.exists() for d in config_dirs):
         return None
     if any(shutil.which(b) for b in path_binaries):
@@ -319,7 +325,7 @@ def install_claude_desktop(
       network) and want the client to connect remotely.
     """
     path = config_path or claude_desktop_config_path()
-    if not force:
+    if not force and config_path is None:
         skip = _client_not_detected_skip("Claude Desktop", path, config_dirs=(path.parent,), path_binaries=())
         if skip is not None:
             return skip
@@ -409,7 +415,7 @@ def install_claude_code(
     mcp-aemps@latest stdio``). HTTP opt-in via ``transport="http"`` for
     when a separately-running server is reachable.
     """
-    if not force:
+    if not force and config_path is None:
         skip = _client_not_detected_skip(
             "Claude Code",
             claude_code_config_path() if config_path is None else config_path,
@@ -558,7 +564,7 @@ def install_codex(
     ``transport="http"``.
     """
     path = config_path or codex_config_path()
-    if not force:
+    if not force and config_path is None:
         skip = _client_not_detected_skip(
             "Codex CLI", path, config_dirs=(path.parent,), path_binaries=("codex",)
         )
@@ -712,7 +718,7 @@ def install_vscode(
     Defaults to stdio; pass ``transport="http"`` for shared deployments.
     """
     path = config_path or vscode_user_mcp_path()
-    if not force:
+    if not force and config_path is None:
         skip = _client_not_detected_skip("VS Code", path, config_dirs=(path.parent,), path_binaries=("code",))
         if skip is not None:
             return skip
@@ -815,7 +821,7 @@ def install_cursor(
     shared-server deployments.
     """
     path = config_path or cursor_config_path()
-    if not force:
+    if not force and config_path is None:
         skip = _client_not_detected_skip(
             "Cursor", path, config_dirs=(path.parent,), path_binaries=("cursor",)
         )
@@ -889,7 +895,7 @@ def install_windsurf(
     (not ``url`` — distinct from every other client).
     """
     path = config_path or windsurf_config_path()
-    if not force:
+    if not force and config_path is None:
         skip = _client_not_detected_skip(
             "Windsurf", path, config_dirs=(path.parent,), path_binaries=("windsurf",)
         )
@@ -969,7 +975,7 @@ def install_zed(
     key even when empty); HTTP entries use ``url``.
     """
     path = config_path or zed_settings_path()
-    if not force:
+    if not force and config_path is None:
         skip = _client_not_detected_skip("Zed", path, config_dirs=(path.parent,), path_binaries=("zed",))
         if skip is not None:
             return skip
@@ -1079,7 +1085,7 @@ def install_continue(
     re-runs replace exactly our block.
     """
     path = config_path or continue_config_path()
-    if not force:
+    if not force and config_path is None:
         skip = _client_not_detected_skip("Continue.dev", path, config_dirs=(path.parent,), path_binaries=())
         if skip is not None:
             return skip
@@ -1180,7 +1186,7 @@ def install_jetbrains(
     configure manually: Settings → Tools → AI Assistant → MCP servers.
     """
     path = config_path or jetbrains_config_path()
-    if not force:
+    if not force and config_path is None:
         skip = _client_not_detected_skip(
             "JetBrains Junie", path, config_dirs=(path.parent,), path_binaries=()
         )
@@ -1279,7 +1285,7 @@ def install_antigravity(
     Google's docs).
     """
     path = config_path or antigravity_config_path()
-    if not force:
+    if not force and config_path is None:
         skip = _client_not_detected_skip(
             "Antigravity",
             path,

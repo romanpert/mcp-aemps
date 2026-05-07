@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.15] — 2026-05-07
+
+### Fixed
+
+- **Installer detection check no longer trips tests / IaC that pass
+  an explicit `config_path`.** v0.4.13 added skip-when-client-not-
+  detected logic that fired even when a caller passed
+  `config_path=` explicitly — including the test suite, which
+  CI-runs on Linux runners with no IDE installed. Five
+  `test_claude_code_*` cases regressed on CI for v0.4.14 (`assert
+  'skipped' == 'added'`). Now every `install_*` short-circuits the
+  detection check when an explicit `config_path` is provided —
+  caller-knows-best wins over auto-detect. `--force` still works
+  for the no-explicit-path case (provisioning the default location
+  on a host that doesn't have the IDE yet). `_client_not_detected_skip`
+  docstring updated to spell out the contract.
+
 ## [0.4.14] — 2026-05-07
 
 Senior-dev audit pass after v0.4.13. Fixes confusing log output, a
