@@ -66,11 +66,20 @@ def test_every_tool_input_schema_is_json_schema() -> None:
 
 
 def test_most_tools_expose_a_typed_output_schema() -> None:
-    """Spec server/tools §"Output Schema" — code-mode hosts (Claude Code,
-    Codex CLI) generate typed client APIs from outputSchema. Every CIMA
-    tool MUST expose one except ``doc_contenido`` whose return shape
-    (dict | str depending on ``format``) is intentionally a Union and
-    can't be usefully constrained."""
+    """Spec server/tools §"Output Schema" — code-mode hosts generate typed
+    client APIs from outputSchema. Most CIMA tools expose a typed
+    Pydantic envelope; the documented exceptions are:
+
+    * ``doc_contenido`` — return shape is ``dict | str`` depending on
+      ``format`` (json vs html/txt), an intentional Union we can't
+      usefully constrain.
+    * ``buscar_medicamentos``, ``listar_presentaciones``,
+      ``listar_notas``, ``listar_materiales``, ``problemas_suministro``
+      — emit ``ResourceLink`` ContentBlocks (item 7b), so they return a
+      ``list[ContentBlock]`` instead of a typed envelope.
+    * ``html_ficha_tecnica`` / ``html_prospecto`` — return raw HTML
+      strings; FastMCP auto-wraps with ``{result: str}``.
+    """
     from app.stdio_server import build_server
 
     tools = asyncio.run(build_server().list_tools())
@@ -79,17 +88,89 @@ def test_most_tools_expose_a_typed_output_schema() -> None:
         f"unexpected tools without outputSchema: {no_schema}"
     )
 
-    expected_titles = {
+    typed_envelope_titles = {
         "CimaResponse",
         "CimaPaginatedResponse",
         "CimaCollectionResponse",
-        # Plus FastMCP's auto-wrapper title for primitive returns.
     }
-    typed = [t for t in tools if t.outputSchema and t.outputSchema.get("title") in expected_titles]
-    assert len(typed) >= 17, (
-        f"expected ≥17 tools with one of the typed envelopes; got "
-        f"{len(typed)} (titles: { {t.outputSchema.get('title') for t in tools} })"
+    typed = [
+        t for t in tools
+        if t.outputSchema and t.outputSchema.get("title") in typed_envelope_titles
+    ]
+    titles_seen = {(t.outputSchema or {}).get("title") for t in tools}
+    assert len(typed) >= 13, (
+        f"expected ≥13 tools with a typed envelope; got "
+        f"{len(typed)} (titles seen: {titles_seen})"
     )
+
+
+def test_buscar_medicamentos_runtime_emits_resource_links() -> None:
+    """End-to-end smoke for item 7b: with the upstream call mocked, the
+    runtime ``tools/call`` content array MUST contain the original
+    TextContent followed by one ResourceLink per hit. Code-mode hosts
+    drop into ``resources/read`` against those URIs to lazy-load only
+    the items the model wants."""
+    from unittest.mock import AsyncMock, patch
+
+    from mcp.types import ResourceLink, TextContent
+
+    from app.stdio_server import build_server
+
+    mock_payload = {
+        "resultados": [
+            {"nregistro": "12345", "nombre": "Aspirina 500mg", "cn": "654321"},
+            {"nregistro": "67890", "nombre": "Ibuprofeno 600mg", "cn": "111222"},
+        ],
+        "totalFilas": 2,
+        "metadata": {"fuente": "test"},
+    }
+
+    async def go():
+        with patch(
+            "app.stdio_server.core_buscar_medicamentos",
+            AsyncMock(return_value=mock_payload),
+        ):
+            server = build_server()
+            tool = server._tool_manager._tools["buscar_medicamentos"]
+            return await tool.run({"nombre": "asp"}, context=None, convert_result=True)
+
+    result = asyncio.run(go())
+    assert isinstance(result, tuple), "expected (unstructured, structured) tuple"
+    unstructured, _structured = result
+
+    text_blocks = [c for c in unstructured if isinstance(c, TextContent)]
+    link_blocks = [c for c in unstructured if isinstance(c, ResourceLink)]
+    assert len(text_blocks) == 1, "expected exactly one TextContent envelope"
+    assert "Aspirina" in text_blocks[0].text, "TextContent should contain the JSON payload"
+    assert {str(l.uri) for l in link_blocks} == {
+        "cima://medicamento/12345",
+        "cima://medicamento/67890",
+    }, "expected one ResourceLink per result keyed by nregistro"
+
+
+def test_search_tools_emit_resource_link_content_blocks() -> None:
+    """Item 7b: the 5 search/collection tools return ``list[ContentBlock]``
+    so code-mode hosts can lazy-resolve hits via ``cima://`` URIs instead
+    of inlining every full payload. The auto-generated outputSchema for
+    these is a wrapper-shape (``{result: array}``), distinct from the
+    typed Pydantic envelopes used by single-item tools."""
+    from app.stdio_server import build_server
+
+    tools = {t.name: t for t in asyncio.run(build_server().list_tools())}
+    expected_link_emitters = {
+        "buscar_medicamentos",
+        "listar_presentaciones",
+        "listar_notas",
+        "listar_materiales",
+        "problemas_suministro",
+    }
+    for name in expected_link_emitters:
+        t = tools[name]
+        title = (t.outputSchema or {}).get("title", "")
+        assert title.endswith("Output"), (
+            f"{name}: expected list-of-ContentBlock auto-wrapper schema "
+            f"(title ends with 'Output'); got title={title!r}"
+        )
 
 
 def test_every_tool_has_a_localised_title() -> None:

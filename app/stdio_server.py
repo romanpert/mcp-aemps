@@ -30,7 +30,16 @@ import logging
 from typing import Any, Sequence
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ContentBlock
 
+from app.content_links import (
+    build_search_response,
+    links_for_medicamentos,
+    links_for_presentaciones,
+    links_from_keys,
+    medicamento_link,
+    presentacion_link,
+)
 from app.core import (
     CimaCollectionResponse,
     CimaPaginatedResponse,
@@ -185,8 +194,13 @@ def build_server(
         psicotropo: int | None = None,
         estuopsico: int | None = None,
         pagina: int = 1,
-    ) -> CimaPaginatedResponse:
-        return await core_buscar_medicamentos(
+    ) -> list[ContentBlock]:
+        # Item 7b: emit one ResourceLink per hit pointing at
+        # cima://medicamento/{nregistro} so code-mode hosts can lazy-resolve
+        # only the items the model actually wants. Loses structuredContent
+        # vs. the typed envelope used by single-item tools — see
+        # app.content_links for the trade-off.
+        payload = await core_buscar_medicamentos(
             nombre=nombre,
             laboratorio=laboratorio,
             practiv1=practiv1,
@@ -210,6 +224,8 @@ def build_server(
             estuopsico=estuopsico,
             pagina=pagina,
         )
+        links = links_for_medicamentos(payload.get("resultados") or [])
+        return build_search_response(payload, links)
 
     @_tool(description=buscar_ficha_tecnica_description)
     @_wrap
@@ -232,8 +248,9 @@ def build_server(
         psicotropo: int | None = None,
         estuopsico: int | None = None,
         pagina: int = 1,
-    ) -> CimaPaginatedResponse:
-        return await core_listar_presentaciones(
+    ) -> list[ContentBlock]:
+        # Item 7b: emit ResourceLinks pointing at cima://presentacion/{cn}.
+        payload = await core_listar_presentaciones(
             cn=cn,
             nregistro=nregistro,
             vmp=vmp,
@@ -245,6 +262,8 @@ def build_server(
             estuopsico=estuopsico,
             pagina=pagina,
         )
+        links = links_for_presentaciones(payload.get("resultados") or [])
+        return build_search_response(payload, links)
 
     @_tool(description=presentacion_description)
     @_wrap
@@ -318,13 +337,27 @@ def build_server(
         nregistro: list[str] | None = None,
         pagina: int = 1,
         tamanioPagina: int = 25,
-    ) -> CimaCollectionResponse:
-        return await core_problemas_suministro(
+    ) -> list[ContentBlock]:
+        # Item 7b: emit ResourceLinks per CN so code-mode hosts can pull
+        # the full presentacion record on demand. The CN-keyed `data`
+        # dict drives the link list; the global-listing case (no params)
+        # falls back to deriving links from the resultados list.
+        payload = await core_problemas_suministro(
             cn=cn,
             nregistro=nregistro,
             pagina=pagina,
             tamanioPagina=tamanioPagina,
         )
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if isinstance(data, dict):
+            # CN/nregistro mode: keys are CN strings.
+            links = links_from_keys(list(data.keys()), presentacion_link)
+        elif isinstance(data, list):
+            # Global mode: derive links from each row's `cn`.
+            links = links_for_presentaciones(data)
+        else:
+            links = []
+        return build_search_response(payload, links)
 
     @_tool(description=problemas_suministro_dcp_description)
     @_wrap
@@ -338,8 +371,14 @@ def build_server(
 
     @_tool(description=listar_notas_description)
     @_wrap
-    async def listar_notas(nregistro: list[str]) -> CimaCollectionResponse:
-        return await core_listar_notas(nregistro=nregistro)
+    async def listar_notas(nregistro: list[str]) -> list[ContentBlock]:
+        # Item 7b: emit ResourceLinks for each nregistro that returned
+        # at least one nota.
+        payload = await core_listar_notas(nregistro=nregistro)
+        notas = payload.get("notas") if isinstance(payload, dict) else None
+        keys = list(notas.keys()) if isinstance(notas, dict) else []
+        links = links_from_keys(keys, medicamento_link)
+        return build_search_response(payload, links)
 
     @_tool(description=obtener_notas_description)
     @_wrap
@@ -348,8 +387,13 @@ def build_server(
 
     @_tool(description=listar_materiales_description)
     @_wrap
-    async def listar_materiales(nregistro: list[str]) -> CimaCollectionResponse:
-        return await core_listar_materiales(nregistro=nregistro)
+    async def listar_materiales(nregistro: list[str]) -> list[ContentBlock]:
+        # Item 7b: emit ResourceLinks for each input nregistro. The core
+        # returns a flat list of materiales without per-medicamento keys,
+        # so we use the requested nregistros as the link source.
+        payload = await core_listar_materiales(nregistro=nregistro)
+        links = links_from_keys(nregistro, medicamento_link)
+        return build_search_response(payload, links)
 
     @_tool(description=obtener_materiales_description)
     @_wrap
