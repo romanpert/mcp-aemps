@@ -560,7 +560,18 @@ def main() -> None:
     """Entry point for ``mcp-aemps stdio`` and ``python -m app.stdio_server``."""
     configure_logging()
     server = build_server()
-    asyncio.run(server.run_stdio_async())
+
+    async def _run() -> None:
+        # Fire-and-forget outdated-version check (matches HTTP lifespan
+        # behaviour). The MCP host pipes our stderr to its log, so the
+        # warning surfaces in Claude Desktop / Codex / VS Code logs.
+        from app.config import settings
+        from app.version_check import schedule_check
+
+        schedule_check(settings.mcp_aemps_version)
+        await server.run_stdio_async()
+
+    asyncio.run(_run())
 
 
 if __name__ == "__main__":

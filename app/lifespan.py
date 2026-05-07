@@ -25,6 +25,8 @@ from app.cache import (
     periodic_maestras_refresh,
     warm_maestras,
 )
+from app.cima_client import aclose_shared_client
+from app.config import settings as _settings
 from app.etag_store import (
     InMemoryETagStore,
     RedisETagStore,
@@ -32,6 +34,7 @@ from app.etag_store import (
 from app.etag_store import (
     set_active_store as _set_etag_store,
 )
+from app.version_check import schedule_check as _schedule_version_check
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -85,6 +88,10 @@ def build_lifespan(
         app.state.warmup_task = asyncio.create_task(warm_maestras(app))
         app.state.refresh_task = asyncio.create_task(periodic_maestras_refresh(app))
 
+        # Fire-and-forget outdated-version check. Logs a single WARNING
+        # if PyPI has a newer release; never blocks startup.
+        app.state.version_check_task = _schedule_version_check(_settings.mcp_aemps_version)
+
         # Nest the FastMCP session manager around the serving period when
         # the HTTP transport is mounted. Without this, /mcp requests crash
         # with "Task group is not initialized" because the session manager's
@@ -102,7 +109,7 @@ def build_lifespan(
                     except Exception:
                         logger.exception("Shutdown hook %s failed", getattr(hook, "__name__", hook))
 
-                for task_attr in ("warmup_task", "refresh_task"):
+                for task_attr in ("warmup_task", "refresh_task", "version_check_task"):
                     task = getattr(app.state, task_attr, None)
                     if task and not task.done():
                         task.cancel()
@@ -110,6 +117,9 @@ def build_lifespan(
                             await task
 
                 await close_cache_backend(app)
+                # Drain the shared CIMA httpx client (v0.4.11 perf
+                # fix). Best-effort: never raises.
+                await aclose_shared_client()
                 logger.info("Application lifespan finished")
 
     return lifespan

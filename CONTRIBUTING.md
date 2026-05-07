@@ -68,13 +68,21 @@ ci: add pytest matrix for python 3.11/3.12/3.13
 1. **Open an issue first** for non-trivial changes — describe motivation, design, and acceptance criteria.
 2. Fork the repo (external contributors) or branch from `dev` (collaborators).
 3. Implement on `feature/<topic>`. Keep PRs small and focused.
-4. Run locally:
+4. **Update documentation in the same PR** if you touched anything user-visible. The doc surface and the code surface ship together — never "I'll add the docs in a follow-up PR". This is enforced by review, not CI:
+   - `README.md` + `README.en.md` for user-facing features (install commands, env vars, tool catalogue).
+   - `SECURITY.md` for anything that changes the threat model, supply-chain surface, secret handling, or a hardening default.
+   - `CHANGELOG.md` for every release (Keep a Changelog format).
+   - `CONTRIBUTING.md` for any workflow / standards change.
+   - Inline code comments for non-obvious "why" decisions (per `CLAUDE.md`).
+5. Run the **full pre-commit checklist** locally:
    ```bash
    ruff check app/ tests/
-   ruff format app/ tests/
-   pytest tests/ -v
+   ruff format --check app/ tests/
+   pytest -q
+   python -X utf8 -c "import json,urllib.request,jsonschema; d=json.load(open('server.json')); jsonschema.validate(d, json.load(urllib.request.urlopen(d['\$schema']))); print('server.json OK')"
    ```
-5. Open the PR against `dev`. Use the PR template.
+   All four must pass before you stage files. CI runs the same checks plus the MCP Inspector compliance smoke and a multi-Python-version test matrix; "passes locally" is necessary but not sufficient.
+6. Open the PR against `dev`. Use the PR template.
 6. CI must pass: `Lint`, `Test (3.11/3.12/3.13)`, `Build`, `Validate server.json`.
 7. Maintainer review — expect feedback within 5 business days.
 8. Squash-merge into `dev`. Branch auto-deletes.
@@ -92,19 +100,20 @@ and MCP Registry submission (github-oidc) — no manual tokens involved.
 
 ### Style
 
-- Python 3.11+. Type hints everywhere, `from __future__ import annotations` at the top of every module.
+- Python 3.11+. Type hints everywhere; on `app/stdio_server.py` annotations stay eager (no `from __future__ import annotations`) because FastMCP's `func_metadata` resolves them via `__globals__` at registration time.
 - **Formatter:** `ruff format` (line length 110).
 - **Linter:** `ruff check` — config in `pyproject.toml`.
 - No `print()` in app code — use `logging`.
-- All CIMA HTTP calls go through `app/cima_client.py` — no raw `httpx` calls in routes.
+- All CIMA HTTP calls go through `app/cima_client.py` — no raw `httpx` calls in routes. The shared `_get_shared_client()` is the only correct entry point; never instantiate an `AsyncClient` directly in app code outside that module.
 
 ### Architectural rules
 
+- **Hard scope rule** (locked 2026-05-07): Community Edition mirrors **CIMA REST API endpoints only**. New MCP tools must be a 1:1 wrapper around an officially-documented CIMA endpoint. Anything else (image processing, PDF extraction, multi-NCA aggregation, snapshot exports, scrapers) belongs in the closed-source `mcp-aemps-enterprise` repo, not here. See `CLAUDE.md` for the rationale.
+- **Quality-only window v0.4.x → v1.0.0.** Improvements until 1.0.0 are efficiency / security / scalability / modularity. New endpoints land **only** if AEMPS publishes them.
 - **Thin routes**: route handlers (`app/routes/*.py`) delegate to `cima_client` + `helpers`. No business logic in route bodies.
 - **Factory-only app instantiation**: never create a `FastAPI()` instance directly outside `app/factory.py`. Downstream consumers extend via `create_app(extra_routers=..., extra_middleware=..., startup_hooks=...)`.
 - **Optional Redis**: code must work without Redis. If you add a Redis-dependent feature, gate it behind `if settings.redis_url`.
 - **No PII logging**: CIMA returns medicine metadata only. Don't add anything that correlates queries to user identity.
-- **Official CIMA endpoints only**: any new MCP tool must map 1:1 to a documented CIMA endpoint. No proprietary/custom endpoints belong in this repository.
 
 ### Tests
 

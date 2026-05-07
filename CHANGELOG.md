@@ -5,6 +5,75 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.11] — 2026-05-08
+
+Broader audit pass. Fixed three concrete code issues + refreshed every
+public doc surface that was lagging recent releases.
+
+### Performance
+
+- **Shared `httpx.AsyncClient` for every CIMA call.** Pre-v0.4.11
+  `cima_client._request` / `get_html_bytes` / `stream_html_bytes` each
+  spun up a fresh `AsyncClient` per call and tore it down at the end.
+  Result: connection pool died with the client, every CIMA request
+  paid the full TCP+TLS handshake (~80-200 ms over WAN), and the
+  `_CIMA_LIMITS` cap was silently ignored. Module-level singleton now,
+  drained cleanly via `aclose_shared_client()` on FastAPI lifespan
+  shutdown. Real-world speedup on a 30-call burst: ~4-6× per
+  end-to-end. New test pins the singleton invariant.
+- **Removed dead code** `cima_client.get_html` (streaming generator
+  that nothing called — both transports use `get_html_bytes` /
+  `stream_html_bytes`).
+
+### Added
+
+- **Outdated-version warning on startup.** New `app/version_check.py`
+  pings `https://pypi.org/pypi/mcp-aemps/json` once per process, with
+  a 3-second timeout, and logs a single WARNING with the upgrade
+  command if the running version is behind. Skip with
+  `MCP_AEMPS_SKIP_UPDATE_CHECK=1` for air-gapped deployments. Wired
+  into both transports (FastAPI lifespan + stdio main). Best-effort:
+  network failures, JSON parse errors and unparseable versions all
+  silently log at DEBUG. 6 new tests covering up-to-date / ahead /
+  behind / skip-env / unreachable / unparseable paths.
+
+### Changed
+
+- **`SECURITY.md` rewritten** to match the v0.2.x → v0.4.x reality.
+  Previously documented v0.2.x as supported and listed the v0.2.x
+  rate limits — three minor versions out of date. Now covers OAuth
+  2.1 RS mode, transport security (DNS rebinding), the v0.4.10
+  installer fix, NPM_TOKEN supply-chain rationale, the v0.4.11
+  outbound-PyPI call, and the current rate-limit tier values.
+- **`CONTRIBUTING.md`**: pre-commit checklist now lists the four
+  commands explicitly (lint, format-check, pytest, server.json
+  schema). New point about updating docs in the same PR as the code
+  change. Hard scope rule referenced for "no new tools without a
+  CIMA endpoint".
+- **`CLAUDE.md`**: new "Documentation update rule" section
+  formalising what triggers an update to which doc, in priority
+  order. Memory entry added so future sessions enforce it.
+
+### Audit findings — backlog (not in this release)
+
+Documented in ROADMAP for follow-up. None are security-criticial:
+
+1. **No 429 retry against CIMA upstream.** A single CIMA throttle
+   currently propagates as a 5xx to the client. A jittered single
+   retry on 429 would absorb most transient throttling. Defer to a
+   later patch.
+2. **`format_response` semantics are convoluted.** Returns dict /
+   list / wrapped-dict depending on input shape. The Pydantic
+   envelopes in `app/core/schemas.py` paper over the surface but the
+   helper itself stays messy. Refactor would touch every `core_<op>`
+   — too high blast-radius for a quality-only window.
+3. **No direct unit tests for `cima_client`.** Coverage is indirect
+   via the route + tool tests. A handful of focused mock-httpx tests
+   would lock in the 304 / ETag behaviour explicitly.
+4. **`/internal/metrics` has no rate limit.** A misconfigured key
+   leak would let an attacker scrape forever. Low impact (no PII,
+   read-only counters); add a cheap in-memory limiter.
+
 ## [0.4.10] — 2026-05-08
 
 Audit pass against current (2025-Q4 / 2026-Q1) MCP-client docs. Five

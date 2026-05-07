@@ -11,7 +11,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, AsyncIterator, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 import httpx
 from dateutil import parser
@@ -52,6 +52,70 @@ _DEFAULT_HEADERS = {"Accept": "application/json", "User-Agent": "mcp-aemps/1.0"}
 # itself lives at the top of this module (PEP 8 / E402); ``_etag_store``
 # is a callable returning the currently-active store, so swapping it at
 # runtime takes effect on the next request without a re-import.
+
+
+# ---------------------------------------------------------------------------
+# Shared httpx client (v0.4.11 audit fix)
+# ---------------------------------------------------------------------------
+# Pre-v0.4.11 every ``_request`` / ``get_html_bytes`` / ``stream_html_bytes``
+# call instantiated a new ``httpx.AsyncClient`` and tore it down at the
+# end. Result: connection pool was effectively useless because the pool
+# died with the client, every CIMA call paid the full TCP+TLS handshake
+# cost (~80-200ms over WAN), and the ``_CIMA_LIMITS`` connection cap was
+# silently ignored.
+#
+# The fix: lazy-initialised module-level singleton that lives for the
+# process lifetime. Both transports work:
+#   * HTTP (FastAPI): ``app.lifespan`` calls ``aclose_shared_client``
+#     during shutdown so the connections drain cleanly.
+#   * stdio: the singleton dies with the process — fine for short-lived
+#     subprocess MCP servers spawned by Claude Desktop / uvx.
+#
+# Async lock around init so two concurrent first-request callers don't
+# race-create two clients (one would leak).
+
+_shared_client: httpx.AsyncClient | None = None
+_shared_client_lock: asyncio.Lock | None = None
+
+
+def _get_lock() -> asyncio.Lock:
+    """Lazy-init the lock — ``asyncio.Lock()`` must be created inside a
+    running event loop. Module load happens at import time (no loop)."""
+    global _shared_client_lock
+    if _shared_client_lock is None:
+        _shared_client_lock = asyncio.Lock()
+    return _shared_client_lock
+
+
+async def _get_shared_client() -> httpx.AsyncClient:
+    """Return (creating on first call) the process-wide CIMA client."""
+    global _shared_client
+    if _shared_client is None:
+        async with _get_lock():
+            if _shared_client is None:
+                _shared_client = httpx.AsyncClient(
+                    timeout=TIMEOUT,
+                    limits=_CIMA_LIMITS,
+                    headers=_DEFAULT_HEADERS,
+                    # http2=True would multiplex CIMA calls but requires
+                    # the optional `h2` package; skip until benchmark
+                    # justifies the extra dep.
+                    http2=False,
+                )
+    return _shared_client
+
+
+async def aclose_shared_client() -> None:
+    """Close the shared client cleanly on shutdown. Wired from
+    ``app.lifespan``; safe to call when no client was created."""
+    global _shared_client
+    if _shared_client is not None:
+        try:
+            await _shared_client.aclose()
+        except Exception:  # noqa: BLE001
+            logger.debug("shared CIMA client close raised (best-effort)")
+        _shared_client = None
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -100,9 +164,11 @@ async def _request(
     # global semaphore reference here.
     from app.rate_limits import CIMA_FANOUT_SEMAPHORE
 
-    owns_client = client is None
-    if owns_client:
-        client = httpx.AsyncClient(timeout=TIMEOUT, limits=_CIMA_LIMITS)
+    # Use the shared process-wide client unless a caller passed one
+    # explicitly (test injection). The legacy per-request client pattern
+    # is gone — connection pool now actually pools.
+    if client is None:
+        client = await _get_shared_client()
 
     try:
         clean_params = _clean(params)
@@ -170,9 +236,6 @@ async def _request(
     except httpx.RequestError as e:
         logger.error("RequestError (%s) path=%s", type(e).__name__, path, exc_info=settings.log_stacktraces)
         raise
-    finally:
-        if owns_client:
-            await client.aclose()
 
 
 # ---------------------------------------------------------------------------
@@ -559,23 +622,6 @@ async def materiales(nregistro: Union[str, List[str]]) -> Any | None:
 # ---------------------------------------------------------------------------
 # 12. HTML completo (FT / Prospecto)
 # ---------------------------------------------------------------------------
-async def get_html(
-    tipo: Literal["ft", "p"],
-    nregistro: str,
-    filename: str,
-) -> AsyncIterator[bytes]:
-    """Streaming desde https://cima.aemps.es/cima/dochtml/{tipo}/{nregistro}/{filename}"""
-    url = f"{HTML_BASE_URL}/dochtml/{tipo}/{nregistro}/{filename}"
-    client = httpx.AsyncClient(timeout=TIMEOUT, headers=_DEFAULT_HEADERS)
-    try:
-        resp = await client.get(url, follow_redirects=True)
-        resp.raise_for_status()
-        async for chunk in resp.aiter_bytes():
-            yield chunk
-    finally:
-        await client.aclose()
-
-
 async def get_html_bytes(
     tipo: Literal["ft", "p"],
     nregistro: str,
@@ -587,12 +633,16 @@ async def get_html_bytes(
     responses where the LLM consumes the HTML as a single TextContent,
     or batch fan-out tools that aggregate per-nregistro). Use
     ``stream_html_bytes`` instead for HTTP routes that can pipe the
-    body straight to the client without buffering megabytes."""
+    body straight to the client without buffering megabytes.
+
+    Reuses the shared process-wide client — no new TCP+TLS handshake
+    per call.
+    """
     url = f"{HTML_BASE_URL}/dochtml/{tipo}/{nregistro}/{filename}"
-    async with httpx.AsyncClient(timeout=TIMEOUT, headers=_DEFAULT_HEADERS) as client:
-        resp = await client.get(url, follow_redirects=True)
-        resp.raise_for_status()
-        return resp.content
+    client = await _get_shared_client()
+    resp = await client.get(url, follow_redirects=True)
+    resp.raise_for_status()
+    return resp.content
 
 
 async def stream_html_bytes(
@@ -613,12 +663,15 @@ async def stream_html_bytes(
     Raises ``httpx.HTTPStatusError`` *before* yielding the first chunk
     if the upstream status is not 2xx, so the route's exception
     handler can translate it to a 4xx/5xx response cleanly. Once
-    streaming has started the headers are committed and an
-    error mid-stream surfaces as a partial response — there is no way
-    to upgrade that to an HTTP error per the wire protocol."""
+    streaming has started the headers are committed and an error
+    mid-stream surfaces as a partial response — there is no way to
+    upgrade that to an HTTP error per the wire protocol.
+
+    Reuses the shared process-wide client.
+    """
     url = f"{HTML_BASE_URL}/dochtml/{tipo}/{nregistro}/{filename}"
-    async with httpx.AsyncClient(timeout=TIMEOUT, headers=_DEFAULT_HEADERS) as client:
-        async with client.stream("GET", url, follow_redirects=True) as resp:
-            resp.raise_for_status()
-            async for chunk in resp.aiter_bytes(chunk_size):
-                yield chunk
+    client = await _get_shared_client()
+    async with client.stream("GET", url, follow_redirects=True) as resp:
+        resp.raise_for_status()
+        async for chunk in resp.aiter_bytes(chunk_size):
+            yield chunk
