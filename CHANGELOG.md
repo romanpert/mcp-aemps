@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.15] — 2026-05-07
 
+### Security
+
+- **End-to-end threat model audit, evidence-based.** STRIDE walk over
+  the running v0.4.15 surface. Findings: 0 P0, 1 P1 (JWT alg
+  whitelist — confirmed sound: `RS256/RS384/RS512/ES256/ES384` only,
+  no HS256, no `none`; algorithm-confusion attack not possible),
+  2 P2 (metrics-key rotation guidance, DNS-rebinding default-off
+  rationale). Updated `SECURITY.md` with explicit subsections
+  documenting each: JWT algorithm whitelist (cited at
+  `app/auth.py:90-98`), `/internal/metrics` token management and
+  what the endpoint exposes, anonymous-mode + `0.0.0.0`-bind
+  residual risk by deployment topology. Added a "Threat model
+  audit log" section so each minor release carries a dated audit
+  pass for downstream auditors.
+
 ### Fixed
 
 - **Installer detection check no longer trips tests / IaC that pass
