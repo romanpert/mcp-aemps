@@ -1,8 +1,16 @@
 name: Docker MCP Registry sync
 
-# Auto-opens a PR against romanpert/mcp-registry whenever a new tag is
-# released. The PR updates servers/mcp-aemps/server.yaml + tools.json with
-# the new version + commit SHA.
+# Auto-opens a PR against docker/mcp-registry (via the romanpert fork)
+# whenever a NEW MINOR is released (vX.Y.0). The PR updates
+# servers/mcp-aemps/server.yaml + tools.json with the new version +
+# commit SHA.
+#
+# Why MINOR-only: this is the one publication path that requires a
+# human PR review on the upstream Docker MCP Registry repo. Auto-PRing
+# every patch (vX.Y.1, .2…) would spam reviewers with noise. Patch
+# releases ride the existing entry until the next minor lands. Manual
+# `workflow_dispatch` is available for emergency syncs (e.g. publishing
+# a CVE patch as its own registry entry).
 #
 # Requires: a Personal Access Token stored as repo secret MCP_REGISTRY_PAT
 # with scope: `public_repo` (just enough to push a branch and open a PR
@@ -14,7 +22,7 @@ name: Docker MCP Registry sync
 on:
   push:
     tags:
-      - "v*.*.*"
+      - "v[0-9]+.[0-9]+.0"
   workflow_dispatch:
     inputs:
       version:

@@ -1,13 +1,15 @@
 name: Docker
 
 on:
-  # Build & push the Docker image only on minor releases (vX.Y.0).
-  # Patch tags (vX.Y.1, vX.Y.2…) ride the existing :X.Y and :latest tags
-  # produced by the previous minor build — keeps GHCR storage small and
-  # avoids spamming users with image bumps for tiny patches.
+  # Build & push the Docker image on every release tag (vX.Y.Z). The
+  # GHCR push is fully automated via GITHUB_TOKEN — no PR-review
+  # friction, so the image cadence matches the canonical Python
+  # release cadence one-to-one. The :X.Y and :latest tags get
+  # overwritten on each patch (intended; users tracking a major.minor
+  # always get the latest patch automatically).
   push:
     tags:
-      - "v[0-9]+.[0-9]+.0"
+      - "v*.*.*"
     branches:
       - master
   pull_request:

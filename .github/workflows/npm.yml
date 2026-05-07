@@ -1,13 +1,16 @@
 name: npm
 
 # Publishes the npm wrapper at npm/ to the npmjs.com registry.
-# Triggered on minor releases (vX.Y.0) — same cadence as the Docker image.
-# Uses npm's Trusted Publisher (OIDC) — no NPM_TOKEN secret needed.
+# Triggered on every release tag (vX.Y.Z) — npm publish is fully
+# automated via Trusted Publisher (OIDC), so there is no PR-review
+# friction; the wrapper version follows the canonical Python release
+# cadence one-to-one. Uses npm's Trusted Publisher (OIDC) — no
+# NPM_TOKEN secret needed.
 
 on:
   push:
     tags:
-      - "v[0-9]+.[0-9]+.0"
+      - "v*.*.*"
   workflow_dispatch:
     inputs:
       tag:
