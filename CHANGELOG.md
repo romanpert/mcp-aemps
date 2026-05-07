@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.10] — 2026-05-08
+
+Audit pass against current (2025-Q4 / 2026-Q1) MCP-client docs. Five
+distinct schema bugs were quietly producing broken installs.
+
+### Fixed (high-impact)
+
+- **Every installer now defaults to stdio** with the canonical
+  ``{"command": "uvx", "args": ["mcp-aemps@latest", "stdio"]}``.
+  Previously 7 of 9 installers (Claude Code, Codex CLI, VS Code,
+  Cursor, Windsurf, Zed, Continue, JetBrains Junie) defaulted to
+  HTTP pointing at ``http://localhost:8765/mcp`` — silently broken
+  unless the user happened to be running ``mcp-aemps up`` separately
+  (which most users weren't, because the install command never told
+  them to). HTTP is now opt-in via ``transport="http"`` for shared
+  / multi-user deployments. New regression test
+  ``test_no_default_install_writes_localhost_anywhere`` pins this
+  invariant.
+
+- **VS Code: migrated off the deprecated ``settings.json::mcp.servers``
+  location** to the dedicated ``<user-profile>/Code/User/mcp.json``
+  with the new top-level ``servers`` key. Post-2025-Q4 VS Code surfaces
+  an explicit deprecation banner asking users to migrate; we were
+  triggering it on every reinstall. The new code also opportunistically
+  cleans up the legacy ``mcp.servers.<name>`` entry from
+  ``settings.json`` so users reinstalling after this release stop
+  seeing the banner.
+
+- **Continue.dev: HTTP entries now use the correct ``type: streamable-http``**
+  instead of the invalid ``type: http`` — the ``http`` value was
+  silently dropped from Continue's runtime (not in its schema) so
+  Continue installs were no-ops for HTTP mode. Defaults to stdio
+  with explicit ``type: stdio + command + args``.
+
+- **Zed stdio entries now include the required ``env: {}`` field.**
+  Zed's schema rejects context_servers entries that omit ``env``;
+  the empty object is mandatory.
+
+- **Codex CLI TOML: stdio now writes ``command = "..."`` + ``args = [...]``**
+  in standard TOML form. Previously only HTTP was written.
+
+### Added
+
+- ``transport="stdio"`` (default) and ``transport="http"`` parameters
+  on every install function. Opt-in to HTTP only when you actually
+  run a separately-reachable ``mcp-aemps up`` server.
+- Shared ``STDIO_COMMAND`` + ``STDIO_ARGS`` constants — single source
+  of truth for the launcher across all 9 installers.
+- Centralised ``_stdio_block()`` helper used by every JSON-based
+  installer. Future bumps to the canonical launcher live in one place.
+
+### Tests
+
+- 158/158 (10 new). Each installer has at least:
+  - default-stdio test asserting the canonical block;
+  - explicit ``transport="http"`` test asserting the URL is written
+    where expected;
+  - idempotency + uninstall + preserves-other-entries.
+- Cross-installer ``test_no_default_install_writes_localhost_anywhere``
+  proves no installer leaks a localhost URL into a default install.
+
 ## [0.4.9] — 2026-05-07
 
 ### Changed

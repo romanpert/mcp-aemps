@@ -5,16 +5,40 @@ Each installer is idempotent (running twice is a no-op), atomic (either the
 write succeeds fully or not at all), and additive (preserves existing entries
 in the user's config).
 
-Supported clients:
-- Claude Desktop  (stdio default; mcp-remote HTTP bridge as fallback)
-- Claude Code     (`claude mcp add` CLI preferred, fallback to ~/.claude.json)
-- Codex CLI       (~/.codex/config.toml)
-- VS Code         (settings.json mcp.servers — used by Copilot Chat MCP)
-- Cursor          (~/.cursor/mcp.json)
-- Windsurf        (~/.codeium/windsurf/mcp_config.json)
-- Zed             (settings.json context_servers)
-- Continue.dev    (~/.continue/config.yaml mcpServers block)
-- JetBrains Junie (~/.junie/mcp.json — standard MCP JSON schema)
+**Transport defaults (locked 2026-05-08).** Every installer defaults to
+**stdio** with the canonical Anthropic-style auto-launch:
+
+    {"command": "uvx", "args": ["mcp-aemps@latest", "stdio"]}
+
+stdio is the only mode that "just works" — the host spawns ``uvx`` on
+demand, ``uvx`` downloads + caches the package on first run, no
+separately-running server, no port management. **HTTP is opt-in via
+``transport="http"``** for shared-server / multi-user / observability
+deployments where you actually run ``mcp-aemps up`` somewhere
+reachable. Earlier versions defaulted most installers to HTTP +
+``localhost:8765``, which silently broke unless the user knew to start
+the server first — that bug surfaced as "Server disconnected /
+ECONNREFUSED" with no actionable error.
+
+Supported clients (config path · format quirks):
+
+- Claude Desktop  · ``claude_desktop_config.json::mcpServers``
+                    HTTP via ``npx mcp-remote`` bridge
+- Claude Code     · ``claude mcp add`` CLI preferred, fallback to
+                    ``~/.claude.json::mcpServers``
+- Codex CLI       · ``~/.codex/config.toml::[mcp_servers.<name>]`` (TOML)
+- VS Code         · **dedicated** ``<user-profile>/Code/User/mcp.json::servers``
+                    (settings.json::mcp.servers is deprecated, post-2025-Q4
+                    VS Code shows a banner asking users to migrate).
+- Cursor          · ``~/.cursor/mcp.json::mcpServers`` (or `.cursor/mcp.json`
+                    project-scoped)
+- Windsurf        · ``~/.codeium/windsurf/mcp_config.json::mcpServers``
+                    (HTTP uses ``serverUrl``, not ``url``)
+- Zed             · settings.json ``context_servers`` (HTTP uses ``url``)
+- Continue.dev    · ``~/.continue/config.yaml::mcpServers[]`` (YAML list,
+                    each entry has ``type`` = stdio | streamable-http | sse
+                    — NOT ``http`` which is invalid).
+- JetBrains Junie · ``~/.junie/mcp.json::mcpServers``
 """
 
 from __future__ import annotations
@@ -31,6 +55,20 @@ from typing import Any
 from app.runtime_state import resolve_default_url
 
 SERVER_KEY = "mcp-aemps"
+
+# Canonical stdio launcher for every installer. Single source of truth so
+# version bumps to the package spec only happen in one place.
+STDIO_COMMAND = "uvx"
+STDIO_ARGS: tuple[str, ...] = ("mcp-aemps@latest", "stdio")
+
+
+def _stdio_block() -> dict[str, Any]:
+    """Return the minimal stdio entry shared by every JSON-based
+    installer (Claude Desktop, Cursor, Windsurf, Zed, Continue, Junie,
+    VS Code, Claude Code fallback). ``type: stdio`` is included
+    explicitly because some clients (Continue, the new VS Code mcp.json)
+    require it; clients that ignore it just keep it as a no-op key."""
+    return {"type": "stdio", "command": STDIO_COMMAND, "args": list(STDIO_ARGS)}
 
 
 def _default_url() -> str:
@@ -318,29 +356,70 @@ def install_claude_code(
     scope: str = "user",
     config_path: Path | None = None,
     use_cli: bool | None = None,
+    transport: str = "stdio",
 ) -> InstallResult:
-    """Register mcp-aemps with Claude Code. CLI-preferred, JSON fallback."""
-    url = url or _default_url()
-    # Detection: ``claude`` CLI on PATH OR the per-user profile dir at
-    # ~/.claude/ exists (created by ``claude`` on first run). The
-    # ~/.claude.json file lives at home root so its ``.parent`` is just
-    # the home dir — useless as a signal.
+    """Register mcp-aemps with Claude Code. CLI-preferred, JSON fallback.
+
+    Defaults to stdio (``claude mcp add --transport stdio mcp-aemps -- uvx
+    mcp-aemps@latest stdio``). HTTP opt-in via ``transport="http"`` for
+    when a separately-running server is reachable.
+    """
     warnings = _collect_install_warnings(
         "Claude Code",
         config_dirs=(Path.home() / ".claude",),
         path_binaries=("claude",),
     )
+
+    if transport == "stdio":
+        # claude mcp add CLI form. The `--` separator passes the rest
+        # to uvx unmodified, exactly like claude code's docs example.
+        cli_cmd = [
+            "claude",
+            "mcp",
+            "add",
+            "--scope",
+            scope,
+            "--transport",
+            "stdio",
+            server_key,
+            "--",
+            STDIO_COMMAND,
+            *STDIO_ARGS,
+        ]
+        json_desired: dict[str, Any] = _stdio_block()
+        message_target = "(uvx auto-launch)"
+        if w := _check_command_on_path(STDIO_COMMAND):
+            warnings = (*warnings, w)
+    else:
+        url = url or _default_url()
+        cli_cmd = [
+            "claude",
+            "mcp",
+            "add",
+            "--scope",
+            scope,
+            "--transport",
+            "http",
+            server_key,
+            url,
+        ]
+        json_desired = {"type": "http", "url": url}
+        message_target = f"-> {url}"
+        warnings = (
+            *warnings,
+            f"NOTE: http transport requires a running server at {url}.",
+        )
+
     cli_allowed = config_path is None and (use_cli is None or use_cli)
     if cli_allowed and _claude_cli_available():
         try:
-            cmd = ["claude", "mcp", "add", "--scope", scope, "--transport", "http", server_key, url]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(cli_cmd, capture_output=True, text=True, timeout=30)
             if result.returncode == 0:
                 return InstallResult(
                     "Claude Code",
                     Path("(via `claude mcp add`)"),
                     "added",
-                    f"{server_key} -> {url} (scope={scope})",
+                    f"{server_key} {message_target} (scope={scope})",
                     warnings=warnings,
                 )
             stderr = (result.stderr or "").lower()
@@ -358,7 +437,7 @@ def install_claude_code(
     path = config_path or claude_code_config_path()
     config = _read_json(path)
     config.setdefault("mcpServers", {})
-    desired = {"type": "http", "url": url}
+    desired = json_desired
     existing = config["mcpServers"].get(server_key)
 
     if existing == desired:
@@ -369,7 +448,7 @@ def install_claude_code(
     action = "updated" if existing else "added"
     config["mcpServers"][server_key] = desired
     _atomic_write_json(path, config)
-    return InstallResult("Claude Code", path, action, f"{server_key} -> {url}", warnings=warnings)
+    return InstallResult("Claude Code", path, action, f"{server_key} {message_target}", warnings=warnings)
 
 
 def uninstall_claude_code(
@@ -416,9 +495,13 @@ def install_codex(
     url: str | None = None,
     server_key: str = SERVER_KEY,
     config_path: Path | None = None,
+    transport: str = "stdio",
 ) -> InstallResult:
-    """Append a [mcp_servers.<name>] block to ~/.codex/config.toml (idempotent)."""
-    url = url or _default_url()
+    """Append a [mcp_servers.<name>] block to ~/.codex/config.toml.
+
+    Defaults to stdio with the canonical launcher. HTTP opt-in via
+    ``transport="http"``.
+    """
     path = config_path or codex_config_path()
     warnings = _collect_install_warnings(
         "Codex CLI",
@@ -428,7 +511,24 @@ def install_codex(
     path.parent.mkdir(parents=True, exist_ok=True)
     existing_text = path.read_text(encoding="utf-8") if path.exists() else ""
 
-    block = f'\n[mcp_servers.{server_key}]\nurl = "{url}"\ntransport = "http"\n'
+    if transport == "stdio":
+        # TOML rendering of the stdio block. ``args`` is a TOML array of
+        # strings; ``command`` is a quoted string. Both line-by-line so
+        # the file diffs cleanly across version bumps.
+        args_toml = ", ".join(f'"{a}"' for a in STDIO_ARGS)
+        block = f'\n[mcp_servers.{server_key}]\ncommand = "{STDIO_COMMAND}"\nargs = [{args_toml}]\n'
+        message_target = f"{STDIO_COMMAND} {' '.join(STDIO_ARGS)} (stdio)"
+        if w := _check_command_on_path(STDIO_COMMAND):
+            warnings = (*warnings, w)
+    else:
+        url = url or _default_url()
+        block = f'\n[mcp_servers.{server_key}]\nurl = "{url}"\ntransport = "http"\n'
+        message_target = f"-> {url}"
+        warnings = (
+            *warnings,
+            f"NOTE: http transport requires a running server at {url} (start it with `mcp-aemps up`).",
+        )
+
     header = f"[mcp_servers.{server_key}]"
 
     if header in existing_text:
@@ -461,7 +561,7 @@ def install_codex(
         os.chmod(path, 0o600)
     except OSError:
         pass
-    return InstallResult("Codex CLI", path, action, f"{server_key} -> {url}", warnings=warnings)
+    return InstallResult("Codex CLI", path, action, f"{server_key} {message_target}", warnings=warnings)
 
 
 def uninstall_codex(*, server_key: str = SERVER_KEY, config_path: Path | None = None) -> InstallResult:
@@ -497,9 +597,29 @@ def uninstall_codex(*, server_key: str = SERVER_KEY, config_path: Path | None = 
 
 
 # ---------------------------------------------------------------------------
-# VS Code (user settings.json)
+# VS Code (dedicated mcp.json — NOT settings.json::mcp.servers)
 # ---------------------------------------------------------------------------
-def vscode_settings_path() -> Path:
+# As of late 2025 VS Code surfaces an explicit deprecation banner when MCP
+# servers are configured in settings.json::mcp.servers and asks users to
+# migrate to a dedicated ``mcp.json`` file. We always write the new
+# location now; the old code path is removed entirely so we don't keep
+# resurrecting deprecation warnings on every reinstall.
+
+
+def vscode_user_mcp_path() -> Path:
+    """Per-user dedicated MCP config (post-2025 standard)."""
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "Code" / "User" / "mcp.json"
+    if sys.platform.startswith("win"):
+        appdata = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+        return Path(appdata) / "Code" / "User" / "mcp.json"
+    xdg = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(xdg) / "Code" / "User" / "mcp.json"
+
+
+def vscode_legacy_settings_path() -> Path:
+    """Old settings.json location — only used for opportunistic cleanup
+    of the deprecated ``mcp.servers`` block on uninstall."""
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / "Code" / "User" / "settings.json"
     if sys.platform.startswith("win"):
@@ -509,46 +629,100 @@ def vscode_settings_path() -> Path:
     return Path(xdg) / "Code" / "User" / "settings.json"
 
 
+# Kept as an alias so external callers / tests using ``vscode_settings_path``
+# don't break — points at the new dedicated mcp.json now.
+vscode_settings_path = vscode_user_mcp_path
+
+
 def install_vscode(
     *,
     url: str | None = None,
     server_key: str = SERVER_KEY,
     config_path: Path | None = None,
+    transport: str = "stdio",
 ) -> InstallResult:
-    """Add to VS Code user settings under `mcp.servers.<name>`.
+    """Add to VS Code's dedicated ``mcp.json`` under ``servers.<name>``.
 
-    Format used by the GitHub Copilot Chat MCP integration and other VS Code
-    MCP clients (settings key `mcp.servers`):
-        {"type": "http", "url": "..."}
+    Schema (post-2025 VS Code):
+
+        {"servers": {"<name>": {"type": "stdio"|"http", ...}}}
+
+    Defaults to stdio; pass ``transport="http"`` for shared deployments.
     """
-    url = url or _default_url()
-    path = config_path or vscode_settings_path()
+    path = config_path or vscode_user_mcp_path()
     warnings = _collect_install_warnings(
         "VS Code",
         config_dirs=(path.parent,),
         path_binaries=("code",),
     )
+
+    # Opportunistic migration: if the legacy settings.json had a stale
+    # ``mcp.servers.<name>`` entry, drop it on install so the user
+    # doesn't see VS Code's deprecation banner anymore.
+    if config_path is None:
+        legacy_path = vscode_legacy_settings_path()
+        if legacy_path.exists():
+            legacy = _read_json(legacy_path)
+            if _delete_nested(legacy, ["mcp", "servers", server_key]):
+                _atomic_write_json(legacy_path, legacy)
+                warnings = (
+                    *warnings,
+                    f"NOTE: removed deprecated entry from {legacy_path} "
+                    f"(VS Code now uses dedicated mcp.json).",
+                )
+
     config = _read_json(path)
+    config.setdefault("servers", {})
 
-    desired = {"type": "http", "url": url}
-    existing = _get_nested(config, ["mcp", "servers", server_key])
+    if transport == "stdio":
+        desired: dict[str, Any] = _stdio_block()
+        message_suffix = "(uvx auto-launch); restart VS Code"
+        if w := _check_command_on_path(STDIO_COMMAND):
+            warnings = (*warnings, w)
+    else:
+        url = url or _default_url()
+        desired = {"type": "http", "url": url}
+        message_suffix = f"-> {url}; restart VS Code"
+        warnings = (
+            *warnings,
+            f"NOTE: http transport requires a running server at {url} (start it with `mcp-aemps up`).",
+        )
 
+    existing = config["servers"].get(server_key)
     if existing == desired:
         return InstallResult(
             "VS Code", path, "unchanged", f"{server_key} already configured", warnings=warnings
         )
 
     action = "updated" if existing else "added"
-    _set_nested(config, ["mcp", "servers", server_key], desired)
+    config["servers"][server_key] = desired
     _atomic_write_json(path, config)
-    return InstallResult("VS Code", path, action, f"{server_key} -> {url}", warnings=warnings)
+    return InstallResult("VS Code", path, action, f"{server_key} {message_suffix}", warnings=warnings)
 
 
 def uninstall_vscode(*, server_key: str = SERVER_KEY, config_path: Path | None = None) -> InstallResult:
-    path = config_path or vscode_settings_path()
+    path = config_path or vscode_user_mcp_path()
+
+    # Clean both locations: the new mcp.json (authoritative) and the
+    # legacy settings.json (in case the user installed with an older
+    # mcp-aemps version).
+    removed_anywhere = False
     config = _read_json(path)
-    if _delete_nested(config, ["mcp", "servers", server_key]):
+    servers = config.get("servers") or {}
+    if server_key in servers:
+        del servers[server_key]
         _atomic_write_json(path, config)
+        removed_anywhere = True
+
+    if config_path is None:
+        legacy_path = vscode_legacy_settings_path()
+        if legacy_path.exists():
+            legacy = _read_json(legacy_path)
+            if _delete_nested(legacy, ["mcp", "servers", server_key]):
+                _atomic_write_json(legacy_path, legacy)
+                removed_anywhere = True
+
+    if removed_anywhere:
         return InstallResult("VS Code", path, "removed", f"{server_key} removed")
     return InstallResult("VS Code", path, "unchanged", f"{server_key} was not present")
 
@@ -565,13 +739,14 @@ def install_cursor(
     url: str | None = None,
     server_key: str = SERVER_KEY,
     config_path: Path | None = None,
+    transport: str = "stdio",
 ) -> InstallResult:
     """Add to Cursor's MCP config (~/.cursor/mcp.json).
 
-    Cursor uses the same Claude Desktop-style schema for stdio servers and
-    supports `url` directly for HTTP servers.
+    Defaults to stdio with the canonical ``uvx mcp-aemps@latest stdio``
+    launcher. Pass ``transport="http"`` (with explicit ``url=``) for
+    shared-server deployments.
     """
-    url = url or _default_url()
     path = config_path or cursor_config_path()
     warnings = _collect_install_warnings(
         "Cursor",
@@ -581,7 +756,20 @@ def install_cursor(
     config = _read_json(path)
     config.setdefault("mcpServers", {})
 
-    desired = {"url": url}
+    if transport == "stdio":
+        desired: dict[str, Any] = _stdio_block()
+        message_suffix = "(uvx auto-launch); restart Cursor"
+        if w := _check_command_on_path(STDIO_COMMAND):
+            warnings = (*warnings, w)
+    else:
+        url = url or _default_url()
+        desired = {"url": url}
+        message_suffix = f"-> {url}; restart Cursor"
+        warnings = (
+            *warnings,
+            f"NOTE: http transport requires a running server at {url} (start it with `mcp-aemps up`).",
+        )
+
     existing = config["mcpServers"].get(server_key)
 
     if existing == desired:
@@ -592,7 +780,7 @@ def install_cursor(
     action = "updated" if existing else "added"
     config["mcpServers"][server_key] = desired
     _atomic_write_json(path, config)
-    return InstallResult("Cursor", path, action, f"{server_key} -> {url}; restart Cursor", warnings=warnings)
+    return InstallResult("Cursor", path, action, f"{server_key} {message_suffix}", warnings=warnings)
 
 
 def uninstall_cursor(*, server_key: str = SERVER_KEY, config_path: Path | None = None) -> InstallResult:
@@ -618,13 +806,14 @@ def install_windsurf(
     url: str | None = None,
     server_key: str = SERVER_KEY,
     config_path: Path | None = None,
+    transport: str = "stdio",
 ) -> InstallResult:
     """Add to Windsurf MCP config (~/.codeium/windsurf/mcp_config.json).
 
-    Same schema as Claude Desktop. For HTTP servers, Windsurf >= 1.0
-    supports `serverUrl`; older versions need the mcp-remote bridge.
+    Defaults to stdio with the canonical ``uvx mcp-aemps@latest stdio``
+    launcher. For HTTP, Windsurf uses the field name ``serverUrl``
+    (not ``url`` — distinct from every other client).
     """
-    url = url or _default_url()
     path = config_path or windsurf_config_path()
     warnings = _collect_install_warnings(
         "Windsurf",
@@ -634,7 +823,20 @@ def install_windsurf(
     config = _read_json(path)
     config.setdefault("mcpServers", {})
 
-    desired = {"serverUrl": url}
+    if transport == "stdio":
+        desired: dict[str, Any] = _stdio_block()
+        message_suffix = "(uvx auto-launch); restart Windsurf"
+        if w := _check_command_on_path(STDIO_COMMAND):
+            warnings = (*warnings, w)
+    else:
+        url = url or _default_url()
+        desired = {"serverUrl": url}
+        message_suffix = f"-> {url}; restart Windsurf"
+        warnings = (
+            *warnings,
+            f"NOTE: http transport requires a running server at {url} (start it with `mcp-aemps up`).",
+        )
+
     existing = config["mcpServers"].get(server_key)
 
     if existing == desired:
@@ -645,9 +847,7 @@ def install_windsurf(
     action = "updated" if existing else "added"
     config["mcpServers"][server_key] = desired
     _atomic_write_json(path, config)
-    return InstallResult(
-        "Windsurf", path, action, f"{server_key} -> {url}; restart Windsurf", warnings=warnings
-    )
+    return InstallResult("Windsurf", path, action, f"{server_key} {message_suffix}", warnings=warnings)
 
 
 def uninstall_windsurf(*, server_key: str = SERVER_KEY, config_path: Path | None = None) -> InstallResult:
@@ -679,15 +879,14 @@ def install_zed(
     url: str | None = None,
     server_key: str = SERVER_KEY,
     config_path: Path | None = None,
+    transport: str = "stdio",
 ) -> InstallResult:
     """Add to Zed's user settings under ``context_servers.<name>``.
 
-    Zed exposes MCP servers to its inline assistant via the
-    ``context_servers`` setting. HTTP servers use ``url``; stdio servers use
-    ``command``/``args``. We default to HTTP so the same long-running
-    ``mcp-aemps up`` instance can serve multiple editors.
+    Defaults to stdio with the canonical launcher. Zed expects an
+    explicit ``env: {}`` field on stdio entries (the schema requires the
+    key even when empty); HTTP entries use ``url``.
     """
-    url = url or _default_url()
     path = config_path or zed_settings_path()
     warnings = _collect_install_warnings(
         "Zed",
@@ -696,7 +895,27 @@ def install_zed(
     )
     config = _read_json(path)
 
-    desired = {"url": url}
+    if transport == "stdio":
+        # Zed validates the shape of ``env`` even when empty. Drop the
+        # ``type`` key the other clients accept — Zed's schema rejects
+        # unknown keys on context_servers entries.
+        desired: dict[str, Any] = {
+            "command": STDIO_COMMAND,
+            "args": list(STDIO_ARGS),
+            "env": {},
+        }
+        message_suffix = "(uvx auto-launch); restart Zed"
+        if w := _check_command_on_path(STDIO_COMMAND):
+            warnings = (*warnings, w)
+    else:
+        url = url or _default_url()
+        desired = {"url": url}
+        message_suffix = f"-> {url}; restart Zed"
+        warnings = (
+            *warnings,
+            f"NOTE: http transport requires a running server at {url} (start it with `mcp-aemps up`).",
+        )
+
     existing = _get_nested(config, ["context_servers", server_key])
 
     if existing == desired:
@@ -705,7 +924,7 @@ def install_zed(
     action = "updated" if existing else "added"
     _set_nested(config, ["context_servers", server_key], desired)
     _atomic_write_json(path, config)
-    return InstallResult("Zed", path, action, f"{server_key} -> {url}; restart Zed", warnings=warnings)
+    return InstallResult("Zed", path, action, f"{server_key} {message_suffix}", warnings=warnings)
 
 
 def uninstall_zed(*, server_key: str = SERVER_KEY, config_path: Path | None = None) -> InstallResult:
@@ -728,14 +947,30 @@ _CONTINUE_BLOCK_HEADER = "# --- mcp-aemps (managed by `mcp-aemps install continu
 _CONTINUE_BLOCK_FOOTER = "# --- end mcp-aemps ---"
 
 
-def _build_continue_block(server_key: str, url: str) -> str:
+def _build_continue_stdio_block(server_key: str) -> str:
+    args_yaml = "\n".join(f'      - "{a}"' for a in STDIO_ARGS)
     return (
         f"{_CONTINUE_BLOCK_HEADER}\n"
         f"mcpServers:\n"
         f"  - name: {server_key}\n"
-        f"    transport:\n"
-        f"      type: http\n"
-        f"      url: {url}\n"
+        f"    type: stdio\n"
+        f"    command: {STDIO_COMMAND}\n"
+        f"    args:\n"
+        f"{args_yaml}\n"
+        f"{_CONTINUE_BLOCK_FOOTER}\n"
+    )
+
+
+def _build_continue_http_block(server_key: str, url: str) -> str:
+    # Continue.dev's valid type values for HTTP are ``streamable-http``
+    # or ``sse`` — ``http`` (which earlier mcp-aemps versions wrote) is
+    # NOT in the schema and silently no-ops on Continue.
+    return (
+        f"{_CONTINUE_BLOCK_HEADER}\n"
+        f"mcpServers:\n"
+        f"  - name: {server_key}\n"
+        f"    type: streamable-http\n"
+        f"    url: {url}\n"
         f"{_CONTINUE_BLOCK_FOOTER}\n"
     )
 
@@ -745,16 +980,18 @@ def install_continue(
     url: str | None = None,
     server_key: str = SERVER_KEY,
     config_path: Path | None = None,
+    transport: str = "stdio",
 ) -> InstallResult:
     """Append a managed mcp-aemps block to ~/.continue/config.yaml.
 
-    Continue.dev (VS Code & JetBrains extension) reads ``mcpServers`` from
-    its YAML config. We avoid pulling PyYAML as a dependency by writing the
-    block as plain text, fenced with sentinel comments so subsequent runs
-    can replace exactly our block without disturbing the user's other
-    settings.
+    Continue.dev (VS Code & JetBrains extension) reads ``mcpServers`` as
+    a YAML list. Each entry needs ``type`` ∈ {``stdio``,
+    ``streamable-http``, ``sse``} — ``http`` (the value earlier
+    mcp-aemps versions wrote) is **not** in Continue's schema and the
+    block silently no-ops. We default to stdio; HTTP entries use
+    ``streamable-http``. Block is fenced with sentinel comments so
+    re-runs replace exactly our block.
     """
-    url = url or _default_url()
     path = config_path or continue_config_path()
     warnings = _collect_install_warnings(
         "Continue.dev",
@@ -763,7 +1000,19 @@ def install_continue(
     path.parent.mkdir(parents=True, exist_ok=True)
     existing_text = path.read_text(encoding="utf-8") if path.exists() else ""
 
-    block = _build_continue_block(server_key, url)
+    if transport == "stdio":
+        block = _build_continue_stdio_block(server_key)
+        message_target = "(uvx auto-launch)"
+        if w := _check_command_on_path(STDIO_COMMAND):
+            warnings = (*warnings, w)
+    else:
+        url = url or _default_url()
+        block = _build_continue_http_block(server_key, url)
+        message_target = f"-> {url}"
+        warnings = (
+            *warnings,
+            f"NOTE: http transport requires a running server at {url}.",
+        )
 
     if _CONTINUE_BLOCK_HEADER in existing_text:
         # Replace the existing managed block in place.
@@ -787,7 +1036,11 @@ def install_continue(
     except OSError:
         pass
     return InstallResult(
-        "Continue.dev", path, action, f"{server_key} -> {url}; restart your IDE", warnings=warnings
+        "Continue.dev",
+        path,
+        action,
+        f"{server_key} {message_target}; restart your IDE",
+        warnings=warnings,
     )
 
 
@@ -828,13 +1081,13 @@ def install_jetbrains(
     url: str | None = None,
     server_key: str = SERVER_KEY,
     config_path: Path | None = None,
+    transport: str = "stdio",
 ) -> InstallResult:
     """Add to JetBrains Junie's MCP config (~/.junie/mcp.json).
 
-    For the classic AI Assistant plugin (not Junie), configure manually:
-    Settings → Tools → AI Assistant → MCP servers → add HTTP server.
+    Defaults to stdio. For the classic AI Assistant plugin (not Junie),
+    configure manually: Settings → Tools → AI Assistant → MCP servers.
     """
-    url = url or _default_url()
     path = config_path or jetbrains_config_path()
     warnings = _collect_install_warnings(
         "JetBrains Junie",
@@ -843,7 +1096,20 @@ def install_jetbrains(
     config = _read_json(path)
     config.setdefault("mcpServers", {})
 
-    desired: dict[str, Any] = {"type": "http", "url": url}
+    if transport == "stdio":
+        desired: dict[str, Any] = _stdio_block()
+        message_target = "(uvx auto-launch)"
+        if w := _check_command_on_path(STDIO_COMMAND):
+            warnings = (*warnings, w)
+    else:
+        url = url or _default_url()
+        desired = {"type": "http", "url": url}
+        message_target = f"-> {url}"
+        warnings = (
+            *warnings,
+            f"NOTE: http transport requires a running server at {url}.",
+        )
+
     existing = config["mcpServers"].get(server_key)
 
     if existing == desired:
@@ -862,7 +1128,7 @@ def install_jetbrains(
         "JetBrains Junie",
         path,
         action,
-        f"{server_key} -> {url}; restart your JetBrains IDE "
+        f"{server_key} {message_target}; restart your JetBrains IDE "
         "(AI Assistant users: configure via Settings -> Tools -> AI Assistant -> MCP servers)",
         warnings=warnings,
     )

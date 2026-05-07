@@ -1,7 +1,15 @@
 """Tests for the auto-install commands.
 
-Always pass `config_path` to keep tests hermetic — never touches the user's
-real Claude / Codex / VSCode / Cursor / Windsurf configs.
+Always pass ``config_path`` to keep tests hermetic — never touches the
+user's real Claude / Codex / VS Code / Cursor / Windsurf configs.
+
+**Schema invariants pinned 2026-05-08** after the v0.4.10 audit pass.
+Every installer defaults to **stdio** with the canonical
+``{"command": "uvx", "args": ["mcp-aemps@latest", "stdio"]}`` block.
+HTTP is opt-in via ``transport="http"`` for shared deployments. The
+test set covers both paths so a regression to "URL by default" or to
+the deprecated VS Code ``settings.json::mcp.servers`` location fails
+loudly at CI time.
 """
 
 from __future__ import annotations
@@ -29,27 +37,31 @@ from app.installers import (
     uninstall_zed,
 )
 
+UVX_LAUNCHER_ARGS = ["mcp-aemps@latest", "stdio"]
+
+
+def _assert_stdio(entry: dict) -> None:
+    """Shared invariant: every stdio-default installer must produce
+    the canonical uvx-based block — no localhost URL, no port, no
+    HTTP-bridge command."""
+    assert entry.get("command") == "uvx", entry
+    assert entry.get("args") == UVX_LAUNCHER_ARGS, entry
+    assert "url" not in entry, entry
+    assert "serverUrl" not in entry, entry
+
 
 # --- Claude Desktop -------------------------------------------------------
 def test_claude_desktop_default_uses_uvx_stdio(tmp_path: Path) -> None:
-    """Default transport is stdio — Claude Desktop launches `uvx mcp-aemps stdio`."""
     p = tmp_path / "claude_desktop_config.json"
     install_claude_desktop(config_path=p)
     data = json.loads(p.read_text(encoding="utf-8"))
-    entry = data["mcpServers"]["mcp-aemps"]
-    assert entry["command"] == "uvx"
-    assert "mcp-aemps@latest" in entry["args"]
-    assert "stdio" in entry["args"]
-    # No HTTP url leaked into the entry
-    assert "url" not in entry
+    _assert_stdio(data["mcpServers"]["mcp-aemps"])
 
 
 def test_claude_desktop_http_mode_uses_mcp_remote_bridge(tmp_path: Path) -> None:
-    """transport='http' falls back to npx mcp-remote bridge (for shared HTTP server)."""
     p = tmp_path / "claude_desktop_config.json"
     install_claude_desktop(url="http://localhost:9000/mcp", config_path=p, transport="http")
-    data = json.loads(p.read_text(encoding="utf-8"))
-    entry = data["mcpServers"]["mcp-aemps"]
+    entry = json.loads(p.read_text(encoding="utf-8"))["mcpServers"]["mcp-aemps"]
     assert entry["command"] == "npx"
     assert "mcp-remote" in entry["args"]
     assert "http://localhost:9000/mcp" in entry["args"]
@@ -57,48 +69,51 @@ def test_claude_desktop_http_mode_uses_mcp_remote_bridge(tmp_path: Path) -> None
 
 def test_claude_desktop_idempotent(tmp_path: Path) -> None:
     p = tmp_path / "claude_desktop_config.json"
-    r1 = install_claude_desktop(config_path=p)
-    assert r1.action == "added"
+    install_claude_desktop(config_path=p)
     r2 = install_claude_desktop(config_path=p)
     assert r2.action == "unchanged"
-    # Switching to http mode must register as 'updated'
-    r3 = install_claude_desktop(url="http://localhost:8080/mcp", config_path=p, transport="http")
-    assert r3.action == "updated"
 
 
 def test_claude_desktop_preserves_other_entries(tmp_path: Path) -> None:
     p = tmp_path / "claude_desktop_config.json"
-    p.write_text(json.dumps({"mcpServers": {"existing-server": {"command": "foo"}}}))
-    install_claude_desktop(url="http://localhost:9000/mcp", config_path=p)
+    p.write_text(json.dumps({"mcpServers": {"other": {"command": "x"}}}))
+    install_claude_desktop(config_path=p)
     data = json.loads(p.read_text(encoding="utf-8"))
-    assert "existing-server" in data["mcpServers"]
+    assert "other" in data["mcpServers"]
     assert "mcp-aemps" in data["mcpServers"]
 
 
 def test_claude_desktop_uninstall_idempotent(tmp_path: Path) -> None:
     p = tmp_path / "claude_desktop_config.json"
-    install_claude_desktop(url="http://localhost:9000/mcp", config_path=p)
-    r1 = uninstall_claude_desktop(config_path=p)
-    assert r1.action == "removed"
-    r2 = uninstall_claude_desktop(config_path=p)
-    assert r2.action == "unchanged"
+    install_claude_desktop(config_path=p)
+    assert uninstall_claude_desktop(config_path=p).action == "removed"
+    assert uninstall_claude_desktop(config_path=p).action == "unchanged"
 
 
 # --- Claude Code ----------------------------------------------------------
-def test_claude_code_fallback_path(tmp_path: Path) -> None:
+def test_claude_code_default_writes_stdio_to_fallback_path(tmp_path: Path) -> None:
     p = tmp_path / "claude.json"
-    r = install_claude_code(url="http://localhost:9000/mcp", config_path=p, use_cli=False)
+    r = install_claude_code(config_path=p, use_cli=False)
     assert r.action == "added"
-    data = json.loads(p.read_text(encoding="utf-8"))
-    entry = data["mcpServers"]["mcp-aemps"]
-    assert entry["type"] == "http"
-    assert entry["url"] == "http://localhost:9000/mcp"
+    _assert_stdio(json.loads(p.read_text(encoding="utf-8"))["mcpServers"]["mcp-aemps"])
+
+
+def test_claude_code_http_mode_writes_url(tmp_path: Path) -> None:
+    p = tmp_path / "claude.json"
+    install_claude_code(
+        url="http://shared.example.com:9000/mcp",
+        config_path=p,
+        use_cli=False,
+        transport="http",
+    )
+    entry = json.loads(p.read_text(encoding="utf-8"))["mcpServers"]["mcp-aemps"]
+    assert entry == {"type": "http", "url": "http://shared.example.com:9000/mcp"}
 
 
 def test_claude_code_preserves_other_entries(tmp_path: Path) -> None:
     p = tmp_path / "claude.json"
     p.write_text(json.dumps({"mcpServers": {"other": {"url": "x"}}}))
-    install_claude_code(url="http://localhost:9000/mcp", config_path=p, use_cli=False)
+    install_claude_code(config_path=p, use_cli=False)
     data = json.loads(p.read_text(encoding="utf-8"))
     assert "other" in data["mcpServers"]
     assert "mcp-aemps" in data["mcpServers"]
@@ -106,117 +121,155 @@ def test_claude_code_preserves_other_entries(tmp_path: Path) -> None:
 
 def test_claude_code_uninstall(tmp_path: Path) -> None:
     p = tmp_path / "claude.json"
-    install_claude_code(url="http://localhost:9000/mcp", config_path=p, use_cli=False)
+    install_claude_code(config_path=p, use_cli=False)
     r = uninstall_claude_code(config_path=p, use_cli=False)
     assert r.action == "removed"
 
 
 # --- Codex ----------------------------------------------------------------
-def test_codex_add_to_empty(tmp_path: Path) -> None:
+def test_codex_default_writes_stdio_block(tmp_path: Path) -> None:
     p = tmp_path / "config.toml"
-    r = install_codex(url="http://localhost:9000/mcp", config_path=p)
+    r = install_codex(config_path=p)
     assert r.action == "added"
     text = p.read_text(encoding="utf-8")
     assert "[mcp_servers.mcp-aemps]" in text
-    assert 'url = "http://localhost:9000/mcp"' in text
+    assert 'command = "uvx"' in text
+    assert '"mcp-aemps@latest"' in text and '"stdio"' in text
+    assert "url =" not in text  # no leaked HTTP fallback
+
+
+def test_codex_http_mode_writes_url(tmp_path: Path) -> None:
+    p = tmp_path / "config.toml"
+    install_codex(url="http://shared.example.com:9000/mcp", config_path=p, transport="http")
+    text = p.read_text(encoding="utf-8")
+    assert 'url = "http://shared.example.com:9000/mcp"' in text
+    assert 'transport = "http"' in text
 
 
 def test_codex_preserves_other_sections(tmp_path: Path) -> None:
     p = tmp_path / "config.toml"
     p.write_text('[other_section]\nfoo = "bar"\n')
-    install_codex(url="http://localhost:9000/mcp", config_path=p)
+    install_codex(config_path=p)
     text = p.read_text(encoding="utf-8")
-    assert "[other_section]" in text
-    assert 'foo = "bar"' in text
+    assert "[other_section]" in text and 'foo = "bar"' in text
     assert "[mcp_servers.mcp-aemps]" in text
 
 
 def test_codex_idempotent_and_update(tmp_path: Path) -> None:
     p = tmp_path / "config.toml"
-    install_codex(url="http://localhost:9000/mcp", config_path=p)
-    r2 = install_codex(url="http://localhost:9000/mcp", config_path=p)
-    assert r2.action == "unchanged"
-    r3 = install_codex(url="http://localhost:8080/mcp", config_path=p)
+    install_codex(config_path=p)
+    assert install_codex(config_path=p).action == "unchanged"
+    r3 = install_codex(config_path=p, transport="http", url="http://localhost:8080/mcp")
     assert r3.action == "updated"
-    assert 'url = "http://localhost:8080/mcp"' in p.read_text(encoding="utf-8")
 
 
-# --- VS Code --------------------------------------------------------------
-def test_vscode_writes_nested_mcp_servers(tmp_path: Path) -> None:
-    p = tmp_path / "settings.json"
-    r = install_vscode(url="http://localhost:9000/mcp", config_path=p)
+# --- VS Code (dedicated mcp.json — NOT the deprecated settings.json) -----
+def test_vscode_default_writes_stdio_to_dedicated_mcp_json(tmp_path: Path) -> None:
+    """The post-2025 VS Code MCP location is ``mcp.json::servers``, not
+    the deprecated ``settings.json::mcp.servers``. A regression here
+    would resurrect VS Code's deprecation banner on every install."""
+    p = tmp_path / "mcp.json"
+    r = install_vscode(config_path=p)
     assert r.action == "added"
     data = json.loads(p.read_text(encoding="utf-8"))
-    assert data["mcp"]["servers"]["mcp-aemps"] == {
-        "type": "http",
-        "url": "http://localhost:9000/mcp",
-    }
+    # Top-level ``servers`` key, NOT nested under ``mcp``.
+    assert "servers" in data and "mcp" not in data
+    _assert_stdio(data["servers"]["mcp-aemps"])
+
+
+def test_vscode_http_mode_writes_type_http(tmp_path: Path) -> None:
+    p = tmp_path / "mcp.json"
+    install_vscode(url="http://shared.example.com:9000/mcp", config_path=p, transport="http")
+    entry = json.loads(p.read_text(encoding="utf-8"))["servers"]["mcp-aemps"]
+    assert entry == {"type": "http", "url": "http://shared.example.com:9000/mcp"}
 
 
 def test_vscode_preserves_other_settings(tmp_path: Path) -> None:
-    p = tmp_path / "settings.json"
-    p.write_text(json.dumps({"editor.fontSize": 14, "workbench.colorTheme": "Dark"}))
-    install_vscode(url="http://localhost:9000/mcp", config_path=p)
+    p = tmp_path / "mcp.json"
+    p.write_text(json.dumps({"inputs": [{"id": "foo"}]}))
+    install_vscode(config_path=p)
     data = json.loads(p.read_text(encoding="utf-8"))
-    assert data["editor.fontSize"] == 14
-    assert data["workbench.colorTheme"] == "Dark"
-    assert "mcp-aemps" in data["mcp"]["servers"]
+    assert data["inputs"] == [{"id": "foo"}]
+    assert "mcp-aemps" in data["servers"]
 
 
 def test_vscode_uninstall(tmp_path: Path) -> None:
-    p = tmp_path / "settings.json"
-    install_vscode(url="http://localhost:9000/mcp", config_path=p)
-    r = uninstall_vscode(config_path=p)
-    assert r.action == "removed"
+    p = tmp_path / "mcp.json"
+    install_vscode(config_path=p)
+    assert uninstall_vscode(config_path=p).action == "removed"
     data = json.loads(p.read_text(encoding="utf-8"))
-    assert "mcp-aemps" not in data.get("mcp", {}).get("servers", {})
+    assert "mcp-aemps" not in data.get("servers", {})
 
 
 # --- Cursor ---------------------------------------------------------------
-def test_cursor_add(tmp_path: Path) -> None:
+def test_cursor_default_writes_stdio(tmp_path: Path) -> None:
     p = tmp_path / "mcp.json"
-    r = install_cursor(url="http://localhost:9000/mcp", config_path=p)
-    assert r.action == "added"
+    install_cursor(config_path=p)
     data = json.loads(p.read_text(encoding="utf-8"))
-    assert data["mcpServers"]["mcp-aemps"] == {"url": "http://localhost:9000/mcp"}
+    _assert_stdio(data["mcpServers"]["mcp-aemps"])
+
+
+def test_cursor_http_mode_writes_url(tmp_path: Path) -> None:
+    p = tmp_path / "mcp.json"
+    install_cursor(url="http://shared.example.com:9000/mcp", config_path=p, transport="http")
+    entry = json.loads(p.read_text(encoding="utf-8"))["mcpServers"]["mcp-aemps"]
+    assert entry == {"url": "http://shared.example.com:9000/mcp"}
 
 
 def test_cursor_uninstall(tmp_path: Path) -> None:
     p = tmp_path / "mcp.json"
-    install_cursor(url="http://localhost:9000/mcp", config_path=p)
-    r = uninstall_cursor(config_path=p)
-    assert r.action == "removed"
+    install_cursor(config_path=p)
+    assert uninstall_cursor(config_path=p).action == "removed"
 
 
 # --- Windsurf -------------------------------------------------------------
-def test_windsurf_uses_serverUrl_field(tmp_path: Path) -> None:
+def test_windsurf_default_writes_stdio(tmp_path: Path) -> None:
     p = tmp_path / "mcp_config.json"
-    r = install_windsurf(url="http://localhost:9000/mcp", config_path=p)
-    assert r.action == "added"
+    install_windsurf(config_path=p)
     data = json.loads(p.read_text(encoding="utf-8"))
-    assert data["mcpServers"]["mcp-aemps"]["serverUrl"] == "http://localhost:9000/mcp"
+    _assert_stdio(data["mcpServers"]["mcp-aemps"])
+
+
+def test_windsurf_http_mode_uses_serverUrl_field(tmp_path: Path) -> None:
+    """Windsurf is the only client that uses ``serverUrl`` (not ``url``)
+    for HTTP entries — the field-name distinction matters."""
+    p = tmp_path / "mcp_config.json"
+    install_windsurf(url="http://shared.example.com:9000/mcp", config_path=p, transport="http")
+    entry = json.loads(p.read_text(encoding="utf-8"))["mcpServers"]["mcp-aemps"]
+    assert entry == {"serverUrl": "http://shared.example.com:9000/mcp"}
 
 
 def test_windsurf_uninstall(tmp_path: Path) -> None:
     p = tmp_path / "mcp_config.json"
-    install_windsurf(url="http://localhost:9000/mcp", config_path=p)
-    r = uninstall_windsurf(config_path=p)
-    assert r.action == "removed"
+    install_windsurf(config_path=p)
+    assert uninstall_windsurf(config_path=p).action == "removed"
 
 
 # --- Zed ------------------------------------------------------------------
-def test_zed_writes_context_servers(tmp_path: Path) -> None:
+def test_zed_default_writes_stdio_with_empty_env(tmp_path: Path) -> None:
+    """Zed's schema requires the ``env`` key on context_servers entries
+    even when empty — the empty object MUST be present."""
     p = tmp_path / "settings.json"
-    r = install_zed(url="http://localhost:9000/mcp", config_path=p)
-    assert r.action == "added"
-    data = json.loads(p.read_text(encoding="utf-8"))
-    assert data["context_servers"]["mcp-aemps"] == {"url": "http://localhost:9000/mcp"}
+    install_zed(config_path=p)
+    entry = json.loads(p.read_text(encoding="utf-8"))["context_servers"]["mcp-aemps"]
+    assert entry == {
+        "command": "uvx",
+        "args": UVX_LAUNCHER_ARGS,
+        "env": {},
+    }
+
+
+def test_zed_http_mode_writes_url(tmp_path: Path) -> None:
+    p = tmp_path / "settings.json"
+    install_zed(url="http://shared.example.com:9000/mcp", config_path=p, transport="http")
+    entry = json.loads(p.read_text(encoding="utf-8"))["context_servers"]["mcp-aemps"]
+    assert entry == {"url": "http://shared.example.com:9000/mcp"}
 
 
 def test_zed_preserves_other_settings(tmp_path: Path) -> None:
     p = tmp_path / "settings.json"
     p.write_text(json.dumps({"theme": "One Dark", "buffer_font_size": 14}))
-    install_zed(url="http://localhost:9000/mcp", config_path=p)
+    install_zed(config_path=p)
     data = json.loads(p.read_text(encoding="utf-8"))
     assert data["theme"] == "One Dark"
     assert data["buffer_font_size"] == 14
@@ -225,84 +278,130 @@ def test_zed_preserves_other_settings(tmp_path: Path) -> None:
 
 def test_zed_idempotent_and_uninstall(tmp_path: Path) -> None:
     p = tmp_path / "settings.json"
-    install_zed(url="http://localhost:9000/mcp", config_path=p)
-    assert install_zed(url="http://localhost:9000/mcp", config_path=p).action == "unchanged"
-    assert install_zed(url="http://localhost:8080/mcp", config_path=p).action == "updated"
+    install_zed(config_path=p)
+    assert install_zed(config_path=p).action == "unchanged"
+    assert install_zed(config_path=p, transport="http", url="http://x:1/mcp").action == "updated"
     assert uninstall_zed(config_path=p).action == "removed"
     assert uninstall_zed(config_path=p).action == "unchanged"
 
 
 # --- Continue.dev ---------------------------------------------------------
-def test_continue_adds_block_to_empty_config(tmp_path: Path) -> None:
+def test_continue_default_writes_stdio_block(tmp_path: Path) -> None:
     p = tmp_path / "config.yaml"
-    r = install_continue(url="http://localhost:9000/mcp", config_path=p)
+    r = install_continue(config_path=p)
     assert r.action == "added"
     text = p.read_text(encoding="utf-8")
     assert "mcp-aemps (managed by `mcp-aemps install continue`)" in text
     assert "name: mcp-aemps" in text
-    assert "url: http://localhost:9000/mcp" in text
+    assert "type: stdio" in text
+    assert "command: uvx" in text
+
+
+def test_continue_http_mode_uses_streamable_http_type(tmp_path: Path) -> None:
+    """``type: http`` is invalid in Continue's schema (silently no-ops);
+    HTTP entries must use ``streamable-http`` or ``sse``."""
+    p = tmp_path / "config.yaml"
+    install_continue(url="http://shared.example.com:9000/mcp", config_path=p, transport="http")
+    text = p.read_text(encoding="utf-8")
+    assert "type: streamable-http" in text
+    assert "type: http" not in text  # invalid value must NOT be written
+    assert "url: http://shared.example.com:9000/mcp" in text
 
 
 def test_continue_preserves_existing_yaml(tmp_path: Path) -> None:
     p = tmp_path / "config.yaml"
     p.write_text("models:\n  - name: gpt-4o\n    provider: openai\n", encoding="utf-8")
-    install_continue(url="http://localhost:9000/mcp", config_path=p)
+    install_continue(config_path=p)
     text = p.read_text(encoding="utf-8")
-    assert "models:" in text
-    assert "name: gpt-4o" in text
+    assert "models:" in text and "name: gpt-4o" in text
     assert "name: mcp-aemps" in text
 
 
 def test_continue_idempotent_and_update(tmp_path: Path) -> None:
     p = tmp_path / "config.yaml"
-    install_continue(url="http://localhost:9000/mcp", config_path=p)
-    assert install_continue(url="http://localhost:9000/mcp", config_path=p).action == "unchanged"
-    r = install_continue(url="http://localhost:8080/mcp", config_path=p)
+    install_continue(config_path=p)
+    assert install_continue(config_path=p).action == "unchanged"
+    r = install_continue(config_path=p, transport="http", url="http://shared:8080/mcp")
     assert r.action == "updated"
-    assert "url: http://localhost:8080/mcp" in p.read_text(encoding="utf-8")
-    assert "url: http://localhost:9000/mcp" not in p.read_text(encoding="utf-8")
+    assert "url: http://shared:8080/mcp" in p.read_text(encoding="utf-8")
 
 
 def test_continue_uninstall_removes_only_managed_block(tmp_path: Path) -> None:
     p = tmp_path / "config.yaml"
     p.write_text("models:\n  - name: gpt-4o\n", encoding="utf-8")
-    install_continue(url="http://localhost:9000/mcp", config_path=p)
-    r = uninstall_continue(config_path=p)
-    assert r.action == "removed"
+    install_continue(config_path=p)
+    assert uninstall_continue(config_path=p).action == "removed"
     text = p.read_text(encoding="utf-8")
-    assert "models:" in text
-    assert "mcp-aemps" not in text
+    assert "models:" in text and "mcp-aemps" not in text
     assert uninstall_continue(config_path=p).action == "unchanged"
 
 
 # --- JetBrains Junie ------------------------------------------------------
-def test_jetbrains_writes_mcp_servers_block(tmp_path: Path) -> None:
+def test_jetbrains_default_writes_stdio(tmp_path: Path) -> None:
     p = tmp_path / "mcp.json"
-    r = install_jetbrains(url="http://localhost:9000/mcp", config_path=p)
-    assert r.action == "added"
+    install_jetbrains(config_path=p)
     data = json.loads(p.read_text(encoding="utf-8"))
-    assert data["mcpServers"]["mcp-aemps"] == {"type": "http", "url": "http://localhost:9000/mcp"}
+    _assert_stdio(data["mcpServers"]["mcp-aemps"])
+
+
+def test_jetbrains_http_mode_writes_type_http(tmp_path: Path) -> None:
+    p = tmp_path / "mcp.json"
+    install_jetbrains(url="http://shared.example.com:9000/mcp", config_path=p, transport="http")
+    entry = json.loads(p.read_text(encoding="utf-8"))["mcpServers"]["mcp-aemps"]
+    assert entry == {"type": "http", "url": "http://shared.example.com:9000/mcp"}
 
 
 def test_jetbrains_preserves_other_servers(tmp_path: Path) -> None:
     p = tmp_path / "mcp.json"
     p.write_text(json.dumps({"mcpServers": {"other": {"type": "stdio", "command": "x"}}}))
-    install_jetbrains(url="http://localhost:9000/mcp", config_path=p)
+    install_jetbrains(config_path=p)
     data = json.loads(p.read_text(encoding="utf-8"))
-    assert "other" in data["mcpServers"]
-    assert "mcp-aemps" in data["mcpServers"]
+    assert "other" in data["mcpServers"] and "mcp-aemps" in data["mcpServers"]
 
 
 def test_jetbrains_idempotent_and_uninstall(tmp_path: Path) -> None:
     p = tmp_path / "mcp.json"
-    install_jetbrains(url="http://localhost:9000/mcp", config_path=p)
-    assert install_jetbrains(url="http://localhost:9000/mcp", config_path=p).action == "unchanged"
-    assert install_jetbrains(url="http://localhost:8080/mcp", config_path=p).action == "updated"
+    install_jetbrains(config_path=p)
+    assert install_jetbrains(config_path=p).action == "unchanged"
+    assert (
+        install_jetbrains(config_path=p, transport="http", url="http://shared:8080/mcp").action == "updated"
+    )
     assert uninstall_jetbrains(config_path=p).action == "removed"
     assert uninstall_jetbrains(config_path=p).action == "unchanged"
 
 
-# --- Registry symmetry ----------------------------------------------------
+# --- Cross-installer invariants ------------------------------------------
+def test_no_default_install_writes_localhost_anywhere(tmp_path: Path) -> None:
+    """Regression guard for the v0.4.x bug where 7/9 installers defaulted
+    to ``http://localhost:8765/mcp`` — silently broken unless the user
+    happened to have ``mcp-aemps up`` running. After v0.4.10 every
+    default-install must be stdio (no localhost in the written config)."""
+    paths = {
+        "claude_desktop": tmp_path / "claude_desktop_config.json",
+        "claude_code": tmp_path / "claude.json",
+        "codex": tmp_path / "config.toml",
+        "vscode": tmp_path / "vscode-mcp.json",
+        "cursor": tmp_path / "cursor-mcp.json",
+        "windsurf": tmp_path / "windsurf-mcp.json",
+        "zed": tmp_path / "zed-settings.json",
+        "continue": tmp_path / "continue-config.yaml",
+        "jetbrains": tmp_path / "jetbrains-mcp.json",
+    }
+    install_claude_desktop(config_path=paths["claude_desktop"])
+    install_claude_code(config_path=paths["claude_code"], use_cli=False)
+    install_codex(config_path=paths["codex"])
+    install_vscode(config_path=paths["vscode"])
+    install_cursor(config_path=paths["cursor"])
+    install_windsurf(config_path=paths["windsurf"])
+    install_zed(config_path=paths["zed"])
+    install_continue(config_path=paths["continue"])
+    install_jetbrains(config_path=paths["jetbrains"])
+
+    for name, p in paths.items():
+        text = p.read_text(encoding="utf-8")
+        assert "localhost" not in text, f"{name} install leaked localhost into {p}: {text[:200]}"
+
+
 def test_all_installers_have_matching_uninstaller() -> None:
     from app.installers import ALL_INSTALLERS, ALL_UNINSTALLERS
 
@@ -341,3 +440,13 @@ def test_path_resolution_returns_absolute_path() -> None:
         p = fn()
         assert isinstance(p, Path)
         assert p.is_absolute()
+
+
+def test_vscode_settings_path_now_points_at_dedicated_mcp_json() -> None:
+    """v0.4.10 migration: ``vscode_settings_path`` is aliased to the new
+    ``mcp.json`` location. Tests / docs that imported the old name keep
+    working but point at the new file."""
+    from app.installers import vscode_settings_path, vscode_user_mcp_path
+
+    assert vscode_settings_path() == vscode_user_mcp_path()
+    assert vscode_settings_path().name == "mcp.json"
