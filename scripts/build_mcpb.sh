@@ -23,20 +23,25 @@ OUT_DIR="dist"
 mkdir -p "${OUT_DIR}"
 
 # Sync the bundled pyproject + manifest to the same version we are building.
+# UTF-8 is set explicitly so this also works on Windows shells (default
+# cp1252 would mojibake non-ASCII glyphs in display_name / long_description).
 python - <<EOF
 import json, pathlib, re
 version = "${VERSION}"
 
 manifest_path = pathlib.Path("mcpb/manifest.json")
-manifest = json.loads(manifest_path.read_text())
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 manifest["version"] = version
-manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+manifest_path.write_text(
+    json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
+    encoding="utf-8",
+)
 
 pyproject_path = pathlib.Path("mcpb/pyproject.toml")
-text = pyproject_path.read_text()
+text = pyproject_path.read_text(encoding="utf-8")
 text = re.sub(r'^version = ".*"$', f'version = "{version}"', text, count=1, flags=re.MULTILINE)
 text = re.sub(r'"mcp-aemps==[^"]+"', f'"mcp-aemps=={version}"', text)
-pyproject_path.write_text(text)
+pyproject_path.write_text(text, encoding="utf-8")
 EOF
 
 # mcpb pack writes <name>-<version>.mcpb in CWD; run it from the bundle dir.

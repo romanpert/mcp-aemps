@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] — 2026-05-07
+
+### Fixed
+
+- **MCPB bundle manifest** — added the required `server.mcp_config`
+  block (`command: uv`, `args: --directory ${__dirname} run
+  server/main.py`, `env` wired to the manifest's `user_config`). The
+  v0.4.0 release.yml run failed at the `build-mcpb` step because the
+  `@anthropic-ai/mcpb` validator rejects manifests without
+  `mcp_config` even for `type: uv` (the CLI is stricter than its own
+  docs). All 0.4.0 features are unchanged; this is a release-pipeline
+  fix only.
+- **`scripts/build_mcpb.sh`** reads/writes the manifest with explicit
+  `encoding="utf-8"` and `ensure_ascii=False` so running the build
+  locally on Windows (default cp1252) doesn't mojibake the em-dash in
+  `display_name` / `long_description`.
+
 ## [0.4.0] — 2026-05-07
 
 Anthropic MCP best-practices 2026-Q2 alignment. Skipped `0.3.0` to mark

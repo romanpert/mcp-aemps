@@ -42,7 +42,21 @@
   ],
   "server": {
     "type": "uv",
-    "entry_point": "server/main.py"
+    "entry_point": "server/main.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "${__dirname}",
+        "run",
+        "server/main.py"
+      ],
+      "env": {
+        "LOG_LEVEL": "${user_config.log_level}",
+        "REDIS_URL": "${user_config.redis_url}",
+        "MCP_AEMPS_LOCALE": "${user_config.mcp_aemps_locale}"
+      }
+    }
   },
   "tools_generated": true,
   "prompts_generated": true,
