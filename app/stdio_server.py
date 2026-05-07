@@ -47,10 +47,11 @@ from app.core import (
     core_problemas_suministro_dcpf,
     core_registro_cambios,
 )
-from app.logging_setup import configure_logging
+from app.logging_setup import apply_mcp_log_level, configure_logging
 from app.mcp_constants import (
     MCP_AEMPS_SYSTEM_PROMPT,
     READ_ONLY_AEMPS_ANNOTATIONS,
+    TOOL_TITLES,
     buscar_ficha_tecnica_description,
     doc_contenido_description,
     doc_secciones_description,
@@ -123,10 +124,20 @@ def build_server(
         return wrap_stdio_tool(hooks, func)
 
     # Curry FastMCP.tool so every CIMA tool inherits the uniform read-only
-    # annotations. Per-tool overrides (e.g. a future write tool) can still
-    # call ``server.tool(annotations=...)`` directly.
+    # annotations + the localised display title. ``title`` is looked up by
+    # the wrapped function's ``__name__`` (which is also what FastMCP uses
+    # as the tool ``name``), so adding a tool only needs the matching entry
+    # in ``TOOL_TITLES``. Per-tool overrides (e.g. a future write tool) can
+    # still call ``server.tool(annotations=...)`` directly.
     def _tool(*, description: str):
-        return server.tool(description=description, annotations=READ_ONLY_AEMPS_ANNOTATIONS)
+        def decorator(func):
+            return server.tool(
+                title=TOOL_TITLES.get(func.__name__),
+                description=description,
+                annotations=READ_ONLY_AEMPS_ANNOTATIONS,
+            )(func)
+
+        return decorator
 
     # ------------------------------------------------------------------
     # Medicamentos
@@ -391,6 +402,21 @@ def build_server(
         nregistro: list[str], filename: str = "Prospecto.html"
     ) -> dict[str, Any]:
         return await core_html_prospecto_multiple(nregistro=nregistro, filename=filename)
+
+    # ------------------------------------------------------------------
+    # MCP logging utility — clients can adjust verbosity at runtime via
+    # ``logging/setLevel``. Spec ref: server/utilities/logging. Wired here
+    # so both transports inherit it (HTTP transport mounts the same FastMCP
+    # instance from app.factory.create_app).
+    # ------------------------------------------------------------------
+    @server._mcp_server.set_logging_level()
+    async def _set_log_level(level: str) -> None:  # pragma: no cover - thin shim
+        applied = apply_mcp_log_level(level)
+        logger.info(
+            "MCP logging/setLevel applied: %s → stdlib level %s",
+            level,
+            logging.getLevelName(applied),
+        )
 
     # ------------------------------------------------------------------
     # Curated MCP Prompts — workflows for farmacia / hospital / industria /

@@ -9,6 +9,7 @@ Public names re-exported for both transports (FastMCP stdio + FastAPI HTTP):
 
 * ``READ_ONLY_AEMPS_ANNOTATIONS`` — tool annotations (locale-independent).
 * ``MCP_AEMPS_SYSTEM_PROMPT`` — agent-level system prompt.
+* ``TOOL_TITLES`` — display names per tool (spec tools §205 ``title``).
 * 21 ``<name>_description`` constants — one per official CIMA tool.
 * ``system_info_prompt_description`` — describes the meta-prompt route.
 
@@ -27,6 +28,7 @@ from app.config import settings
 if settings.mcp_aemps_locale == "en":
     from app._mcp_constants_en import (  # noqa: F401
         MCP_AEMPS_SYSTEM_PROMPT,
+        TOOL_TITLES,
         buscar_ficha_tecnica_description,
         doc_contenido_description,
         doc_secciones_description,
@@ -53,6 +55,7 @@ if settings.mcp_aemps_locale == "en":
 else:
     from app._mcp_constants_es import (  # noqa: F401
         MCP_AEMPS_SYSTEM_PROMPT,
+        TOOL_TITLES,
         buscar_ficha_tecnica_description,
         doc_contenido_description,
         doc_secciones_description,

@@ -4,6 +4,10 @@
 Console + rotating file handler with gzip compression. No OTel coupling
 by default; downstream consumers can replace the formatter via a startup
 hook to add trace/correlation IDs.
+
+Also exposes ``apply_mcp_log_level`` — the bridge from the MCP
+``logging/setLevel`` request (RFC 5424 string levels per spec) to the
+stdlib logger hierarchy. Wired into FastMCP from ``app.stdio_server``.
 """
 
 from __future__ import annotations
@@ -18,6 +22,36 @@ from pathlib import Path
 from app.config import settings
 
 _LOG_FORMAT = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+
+
+# Spec ref: MCP logging utility (modelcontextprotocol.io/specification/server/utilities/logging)
+# uses RFC 5424 syslog levels. Map them down to the stdlib's narrower set.
+_MCP_LEVEL_TO_STDLIB: dict[str, int] = {
+    "debug": logging.DEBUG,
+    "info": logging.INFO,
+    "notice": logging.INFO,
+    "warning": logging.WARNING,
+    "error": logging.ERROR,
+    "critical": logging.CRITICAL,
+    "alert": logging.CRITICAL,
+    "emergency": logging.CRITICAL,
+}
+
+
+def apply_mcp_log_level(level: str) -> int:
+    """Apply an MCP ``logging/setLevel`` request to the stdlib logger tree.
+
+    Updates the root logger plus the project's ``mcp.aemps`` logger so
+    handlers actually emit the new level. Returns the resolved stdlib level
+    so callers can log a confirmation if useful.
+
+    Unknown levels fall back to ``INFO`` rather than raising — this is a
+    runtime client request, not a config error.
+    """
+    py_level = _MCP_LEVEL_TO_STDLIB.get(level.lower(), logging.INFO)
+    logging.getLogger().setLevel(py_level)
+    logging.getLogger("mcp.aemps").setLevel(py_level)
+    return py_level
 
 
 def _namer(name: str) -> str:

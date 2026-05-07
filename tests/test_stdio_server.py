@@ -65,6 +65,59 @@ def test_every_tool_input_schema_is_json_schema() -> None:
         assert "properties" in schema, f"{t.name}: schema has no properties"
 
 
+def test_every_tool_has_a_localised_title() -> None:
+    """Spec tools §205: ``title`` is the human-friendly display name shown
+    in client pickers (Claude Desktop, Inspector, Continue). Every CIMA
+    tool MUST expose one in the active locale (default ES)."""
+    from app.stdio_server import build_server
+
+    tools = asyncio.run(build_server().list_tools())
+    missing = [t.name for t in tools if not (t.title or "").strip()]
+    assert not missing, f"tools missing localised title: {missing}"
+
+
+def test_logging_set_level_capability_is_advertised() -> None:
+    """MCP logging utility (server/utilities/logging) — clients can adjust
+    verbosity at runtime. Capability is advertised automatically once the
+    handler is registered on the lowlevel server."""
+    from mcp.server.lowlevel import NotificationOptions
+    from mcp.types import SetLevelRequest
+
+    from app.stdio_server import build_server
+
+    server = build_server()
+    assert SetLevelRequest in server._mcp_server.request_handlers, (
+        "logging/setLevel handler must be registered on the lowlevel server"
+    )
+    caps = server._mcp_server.get_capabilities(
+        notification_options=NotificationOptions(),
+        experimental_capabilities={},
+    )
+    assert caps.logging is not None, "logging capability must be advertised"
+
+
+def test_logging_set_level_applies_to_stdlib_loggers() -> None:
+    """``apply_mcp_log_level`` mutates the stdlib logger tree so handlers
+    actually emit at the requested level."""
+    import logging
+
+    from app.logging_setup import apply_mcp_log_level
+
+    original_root = logging.getLogger().level
+    original_app = logging.getLogger("mcp.aemps").level
+    try:
+        applied = apply_mcp_log_level("warning")
+        assert applied == logging.WARNING
+        assert logging.getLogger().level == logging.WARNING
+        assert logging.getLogger("mcp.aemps").level == logging.WARNING
+        # Unknown levels fall back to INFO rather than raising.
+        applied_unknown = apply_mcp_log_level("not-a-level")
+        assert applied_unknown == logging.INFO
+    finally:
+        logging.getLogger().setLevel(original_root)
+        logging.getLogger("mcp.aemps").setLevel(original_app)
+
+
 def test_every_stdio_tool_has_read_only_annotations() -> None:
     """ChatGPT Dev Mode and Claude Desktop auto-approve UI keys off these
     hints. Every CIMA tool is a non-destructive read against an external
