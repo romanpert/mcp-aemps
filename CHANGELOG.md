@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] — 2026-05-07
+
+### Changed
+
+- **Auto-publish trigger policy realigned** across the five
+  fully-automated destinations:
+  - `release.yml` (PyPI + MCP Registry + GitHub Release with
+    `.mcpb`) → every tag (`v*.*.*`).
+  - `npm.yml` → every tag (was MINOR-only `vX.Y.0`).
+  - `docker.yml` (GHCR) → every tag (was MINOR-only).
+  - `docker-mcp-registry.yml` (PR to docker/mcp-registry) →
+    MINOR-only `vX.Y.0` (was every tag).
+  Rationale: the four OIDC / GITHUB_TOKEN paths are zero-friction
+  (no human review), so they should match the canonical PyPI
+  cadence one-to-one. The Docker MCP Registry sync is the one
+  destination requiring an upstream PR review, so it stays on
+  stable-only to avoid spamming reviewers with patch-level noise.
+- `bin/mcp-aemps.js` (npm wrapper) defaults to `MCP_AEMPS_PYPI_VERSION=latest`,
+  so installations of any npm package version always pull the
+  newest PyPI release of `mcp-aemps`. The npm package version is
+  packaging metadata; the runtime version follows PyPI.
+
+### Note on the v0.4.1 npm publish
+
+v0.4.1 was tagged before the trigger-policy change, so the
+`vX.Y.0` filter excluded it from `npm.yml`'s push-tag event.
+Manual `workflow_dispatch` re-firing failed with `ENEEDAUTH`
+because npm's Trusted Publisher (OIDC) explicitly rejects
+manual dispatches for security reasons (only `push`,
+`pull_request`, `release` are eligible). This release closes
+the gap by firing the full pipeline via `push: tags:` again.
+
 ## [0.4.1] — 2026-05-07
 
 ### Fixed
