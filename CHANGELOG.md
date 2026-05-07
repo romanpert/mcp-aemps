@@ -5,7 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.12] — 2026-05-08
+## [0.4.13] — 2026-05-07
+
+Removes the maestras warmup dead code path with empirical evidence,
+makes installers skip-by-default when the target client isn't on the
+machine, and adds a `--force` opt-in for provisioning hosts.
+
+### Fixed
+
+- **Maestras warmup was dead code, not just "wrong IDs".** v0.4.12
+  framed the startup `204 No Content` log noise as missing IDs 2/5
+  in `MAESTRAS_TYPES`. That was wrong by deduction: empirical curl
+  testing on every documented maestra ID (1, 3, 4, 6, 7, 11, 13, 14,
+  15, 16) shows CIMA returns 204 for *every* bare `?maestra=N` call —
+  the API requires a substring filter (`nombre=`, `codigo=`, `id=`)
+  to return data. The whole warmup pattern populated nothing.
+  Removed `warm_maestras`, `periodic_maestras_refresh`, and
+  `MAESTRAS_TYPES` from `app/cache.py`. The on-demand cache fed by
+  the `consultar_maestras` tool itself (which always passes a filter)
+  is unchanged. `/health/ready` no longer gates on a warmup that
+  never warmed anything. The empirical reasoning lives as a
+  docstring at the top of `app/cache.py` so we don't reintroduce
+  the pattern later.
+
+### Changed
+
+- **Installers skip silently when the target client isn't detected.**
+  Before, `mcp-aemps install` (or any per-client subcommand) would
+  write the MCP config even on machines where the IDE/CLI isn't
+  installed — surprising behaviour the user pushed back on as a UX
+  bug ("if we don't detect the program, why do we add MCP config?").
+  Now each `install_<client>` returns `action="skipped"` with a
+  hint to install the client first, unless `--force` is passed.
+  `--force` is plumbed through both `mcp-aemps install` (apply-all)
+  and every per-client subcommand for users who provision config
+  files for hosts they don't run themselves (CI, dotfile repos,
+  IaC).
+
+
 
 Closes the four audit-backlog items deferred in v0.4.11, fixes a startup
 data bug, lands the Antigravity installer, and reorders the CLI install

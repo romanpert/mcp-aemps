@@ -91,9 +91,47 @@ def _default_url() -> str:
 class InstallResult:
     client: str
     config_path: Path
-    action: str  # "added" | "updated" | "unchanged" | "removed"
+    action: str  # "added" | "updated" | "unchanged" | "removed" | "skipped"
     message: str
     warnings: tuple[str, ...] = ()
+
+
+def _client_not_detected_skip(
+    client_name: str,
+    path: "Path",
+    config_dirs: tuple["Path", ...],
+    path_binaries: tuple[str, ...],
+) -> "InstallResult | None":
+    """Return a "skipped" InstallResult if the client isn't detected.
+
+    Pre-v0.4.13 every installer wrote its config even when the client
+    wasn't installed, with a NOTE warning as a footer. UX-confusing
+    ("not detected → installed anyway?") and worse, on most clients
+    the empty parent directory we created (e.g.
+    ``%APPDATA%\\Cursor\\``) confused the actual installer if the user
+    later installed Cursor — we'd ship them a partial install state.
+
+    Default behaviour now: if the client isn't detected, **skip** with
+    an explanatory message + install hint. Caller can override with
+    ``force=True`` for provisioning scripts that want to pre-stage."""
+    if any(d.exists() for d in config_dirs):
+        return None
+    if any(shutil.which(b) for b in path_binaries):
+        return None
+
+    hint = _CLIENT_INSTALL_HINTS.get(client_name, "")
+    install_hint = f"  Install: {hint}" if hint else ""
+    return InstallResult(
+        client=client_name,
+        config_path=path,
+        action="skipped",
+        message=(
+            f"{client_name} not detected — install it first, then re-run "
+            f"`mcp-aemps install`.{install_hint}\n"
+            f"    Pass --force to write the config anyway (provisioning use case)."
+        ),
+        warnings=(),
+    )
 
 
 def _check_command_on_path(command: str) -> str | None:
@@ -266,6 +304,7 @@ def install_claude_desktop(
     server_key: str = SERVER_KEY,
     config_path: Path | None = None,
     transport: str = "stdio",
+    force: bool = False,
 ) -> InstallResult:
     """Add or update the mcp-aemps entry in claude_desktop_config.json.
 
@@ -280,13 +319,14 @@ def install_claude_desktop(
       network) and want the client to connect remotely.
     """
     path = config_path or claude_desktop_config_path()
+    if not force:
+        skip = _client_not_detected_skip("Claude Desktop", path, config_dirs=(path.parent,), path_binaries=())
+        if skip is not None:
+            return skip
     config = _read_json(path)
     config.setdefault("mcpServers", {})
 
     warnings: list[str] = []
-
-    if w := _check_client_installed("Claude Desktop", config_dirs=(path.parent,)):
-        warnings.append(w)
 
     if transport == "stdio":
         desired: dict[str, Any] = {"command": "uvx", "args": ["mcp-aemps@latest", "stdio"]}
@@ -361,6 +401,7 @@ def install_claude_code(
     config_path: Path | None = None,
     use_cli: bool | None = None,
     transport: str = "stdio",
+    force: bool = False,
 ) -> InstallResult:
     """Register mcp-aemps with Claude Code. CLI-preferred, JSON fallback.
 
@@ -368,6 +409,15 @@ def install_claude_code(
     mcp-aemps@latest stdio``). HTTP opt-in via ``transport="http"`` for
     when a separately-running server is reachable.
     """
+    if not force:
+        skip = _client_not_detected_skip(
+            "Claude Code",
+            claude_code_config_path() if config_path is None else config_path,
+            config_dirs=(Path.home() / ".claude",),
+            path_binaries=("claude",),
+        )
+        if skip is not None:
+            return skip
     warnings = _collect_install_warnings(
         "Claude Code",
         config_dirs=(Path.home() / ".claude",),
@@ -500,6 +550,7 @@ def install_codex(
     server_key: str = SERVER_KEY,
     config_path: Path | None = None,
     transport: str = "stdio",
+    force: bool = False,
 ) -> InstallResult:
     """Append a [mcp_servers.<name>] block to ~/.codex/config.toml.
 
@@ -507,6 +558,12 @@ def install_codex(
     ``transport="http"``.
     """
     path = config_path or codex_config_path()
+    if not force:
+        skip = _client_not_detected_skip(
+            "Codex CLI", path, config_dirs=(path.parent,), path_binaries=("codex",)
+        )
+        if skip is not None:
+            return skip
     warnings = _collect_install_warnings(
         "Codex CLI",
         config_dirs=(path.parent,),
@@ -644,6 +701,7 @@ def install_vscode(
     server_key: str = SERVER_KEY,
     config_path: Path | None = None,
     transport: str = "stdio",
+    force: bool = False,
 ) -> InstallResult:
     """Add to VS Code's dedicated ``mcp.json`` under ``servers.<name>``.
 
@@ -654,6 +712,10 @@ def install_vscode(
     Defaults to stdio; pass ``transport="http"`` for shared deployments.
     """
     path = config_path or vscode_user_mcp_path()
+    if not force:
+        skip = _client_not_detected_skip("VS Code", path, config_dirs=(path.parent,), path_binaries=("code",))
+        if skip is not None:
+            return skip
     warnings = _collect_install_warnings(
         "VS Code",
         config_dirs=(path.parent,),
@@ -744,6 +806,7 @@ def install_cursor(
     server_key: str = SERVER_KEY,
     config_path: Path | None = None,
     transport: str = "stdio",
+    force: bool = False,
 ) -> InstallResult:
     """Add to Cursor's MCP config (~/.cursor/mcp.json).
 
@@ -752,6 +815,12 @@ def install_cursor(
     shared-server deployments.
     """
     path = config_path or cursor_config_path()
+    if not force:
+        skip = _client_not_detected_skip(
+            "Cursor", path, config_dirs=(path.parent,), path_binaries=("cursor",)
+        )
+        if skip is not None:
+            return skip
     warnings = _collect_install_warnings(
         "Cursor",
         config_dirs=(path.parent,),
@@ -811,6 +880,7 @@ def install_windsurf(
     server_key: str = SERVER_KEY,
     config_path: Path | None = None,
     transport: str = "stdio",
+    force: bool = False,
 ) -> InstallResult:
     """Add to Windsurf MCP config (~/.codeium/windsurf/mcp_config.json).
 
@@ -819,6 +889,12 @@ def install_windsurf(
     (not ``url`` — distinct from every other client).
     """
     path = config_path or windsurf_config_path()
+    if not force:
+        skip = _client_not_detected_skip(
+            "Windsurf", path, config_dirs=(path.parent,), path_binaries=("windsurf",)
+        )
+        if skip is not None:
+            return skip
     warnings = _collect_install_warnings(
         "Windsurf",
         config_dirs=(path.parent,),
@@ -884,6 +960,7 @@ def install_zed(
     server_key: str = SERVER_KEY,
     config_path: Path | None = None,
     transport: str = "stdio",
+    force: bool = False,
 ) -> InstallResult:
     """Add to Zed's user settings under ``context_servers.<name>``.
 
@@ -892,6 +969,10 @@ def install_zed(
     key even when empty); HTTP entries use ``url``.
     """
     path = config_path or zed_settings_path()
+    if not force:
+        skip = _client_not_detected_skip("Zed", path, config_dirs=(path.parent,), path_binaries=("zed",))
+        if skip is not None:
+            return skip
     warnings = _collect_install_warnings(
         "Zed",
         config_dirs=(path.parent,),
@@ -985,6 +1066,7 @@ def install_continue(
     server_key: str = SERVER_KEY,
     config_path: Path | None = None,
     transport: str = "stdio",
+    force: bool = False,
 ) -> InstallResult:
     """Append a managed mcp-aemps block to ~/.continue/config.yaml.
 
@@ -997,6 +1079,10 @@ def install_continue(
     re-runs replace exactly our block.
     """
     path = config_path or continue_config_path()
+    if not force:
+        skip = _client_not_detected_skip("Continue.dev", path, config_dirs=(path.parent,), path_binaries=())
+        if skip is not None:
+            return skip
     warnings = _collect_install_warnings(
         "Continue.dev",
         config_dirs=(path.parent,),
@@ -1086,6 +1172,7 @@ def install_jetbrains(
     server_key: str = SERVER_KEY,
     config_path: Path | None = None,
     transport: str = "stdio",
+    force: bool = False,
 ) -> InstallResult:
     """Add to JetBrains Junie's MCP config (~/.junie/mcp.json).
 
@@ -1093,6 +1180,12 @@ def install_jetbrains(
     configure manually: Settings → Tools → AI Assistant → MCP servers.
     """
     path = config_path or jetbrains_config_path()
+    if not force:
+        skip = _client_not_detected_skip(
+            "JetBrains Junie", path, config_dirs=(path.parent,), path_binaries=()
+        )
+        if skip is not None:
+            return skip
     warnings = _collect_install_warnings(
         "JetBrains Junie",
         config_dirs=(path.parent,),
@@ -1177,6 +1270,7 @@ def install_antigravity(
     server_key: str = SERVER_KEY,
     config_path: Path | None = None,
     transport: str = "stdio",
+    force: bool = False,
 ) -> InstallResult:
     """Add to Antigravity's MCP config (``~/.gemini/antigravity/mcp_config.json``).
 
@@ -1185,6 +1279,15 @@ def install_antigravity(
     Google's docs).
     """
     path = config_path or antigravity_config_path()
+    if not force:
+        skip = _client_not_detected_skip(
+            "Antigravity",
+            path,
+            config_dirs=(path.parent, Path.home() / ".gemini"),
+            path_binaries=("antigravity",),
+        )
+        if skip is not None:
+            return skip
     warnings = _collect_install_warnings(
         "Antigravity",
         config_dirs=(path.parent, Path.home() / ".gemini"),

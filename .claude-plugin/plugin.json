@@ -1,7 +1,7 @@
 {
   "name": "mcp-aemps",
   "description": "AEMPS / CIMA pharmaceutical regulatory data inside Claude Code: 21 MCP tools, 10 curated prompts, and slash commands that compose them for hospital / industria / public workflows.",
-  "version": "0.4.12",
+  "version": "0.4.13",
   "author": {
     "name": "Roman Perez Dumpert",
     "url": "https://github.com/romanpert"

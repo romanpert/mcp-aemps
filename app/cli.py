@@ -382,7 +382,13 @@ uninstall_app = typer.Typer(
 cli.add_typer(install_app, name="install")
 cli.add_typer(uninstall_app, name="uninstall")
 
-_INSTALL_ICONS = {"added": "✅", "updated": "🔄", "unchanged": "ℹ️", "removed": "🗑️"}
+_INSTALL_ICONS = {
+    "added": "✅",
+    "updated": "🔄",
+    "unchanged": "ℹ️",
+    "removed": "🗑️",
+    "skipped": "⏭️",
+}
 
 
 def _print_install_result(res) -> None:
@@ -425,6 +431,11 @@ def _install_main(
         help=f"MCP endpoint URL (default: from runtime file, else http://{DEFAULT_HOST}:{DEFAULT_PORT}{MCP_PATH})",
     ),
     name: str = typer.Option("mcp-aemps", "--name", help="Server key in client config"),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Write the config even if the client isn't detected on this machine.",
+    ),
 ):
     """Install in ALL detected clients (default when no subcommand)."""
     if ctx.invoked_subcommand is not None:
@@ -434,7 +445,7 @@ def _install_main(
     console.print(f"🔌  Installing [bold]mcp-aemps[/] (key=[cyan]{name}[/])\n")
     for client_name, fn in ALL_INSTALLERS.items():
         try:
-            kwargs = {"server_key": name}
+            kwargs = {"server_key": name, "force": force}
             if url is not None:
                 kwargs["url"] = url
             res = fn(**kwargs)
@@ -448,8 +459,13 @@ def _make_install_cmd(helper):
     def _cmd(
         url: Optional[str] = typer.Option(None, "--url"),
         name: str = typer.Option("mcp-aemps", "--name"),
+        force: bool = typer.Option(
+            False,
+            "--force",
+            help="Write the config even if the client isn't detected on this machine.",
+        ),
     ):
-        kwargs = {"server_key": name}
+        kwargs = {"server_key": name, "force": force}
         if url is not None:
             kwargs["url"] = url
         _print_install_result(helper(**kwargs))

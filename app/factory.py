@@ -153,34 +153,23 @@ def create_app(
 
     @app.get("/health/ready", include_in_schema=False)
     async def health_ready():  # noqa: D401
-        """Readiness — cache backend reachable AND maestras warmup completed.
+        """Readiness — cache backend reachable.
 
-        Kubernetes uses this to decide whether to send traffic. Returns 503
-        until the warmup task finishes (typically <5s on a cold start).
-
-        If a ``health_extra`` callable is registered, its dict is merged into
-        the response body. Any returned key suffixed ``_ready`` whose value
-        is falsy flips the response to 503.
+        Kubernetes uses this to decide whether to send traffic. If a
+        ``health_extra`` callable is registered, its dict is merged into
+        the response body. Any returned key suffixed ``_ready`` whose
+        value is falsy flips the response to 503.
         """
         cache_mode = "redis" if getattr(app.state, "redis", None) else "in-memory"
-        warmup_task = getattr(app.state, "warmup_task", None)
-        warmup_done = warmup_task is None or warmup_task.done()
 
-        if not warmup_done:
-            body: dict[str, Any] = {
-                "status": "starting",
-                "cache": cache_mode,
-                "warmup": "in_progress",
-            }
-            if health_extra is not None:
-                body.update(await _safe_health_extra(app, health_extra))
-            return JSONResponse(body, status_code=503)
-
+        # No more "warmup" gate — the maestras warmup was empirically
+        # a no-op (CIMA returns 204 for bare ``?maestra=N``) and was
+        # removed in v0.4.13. Readiness now depends only on the cache
+        # backend being up + any caller-supplied ``health_extra`` flags.
         body = {
             "status": "ok",
             "version": settings.mcp_aemps_version,
             "cache": cache_mode,
-            "warmup": "completed",
         }
         if health_extra is not None:
             extra = await _safe_health_extra(app, health_extra)

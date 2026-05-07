@@ -23,18 +23,16 @@ from app.stdio_server import build_server
 
 @pytest.fixture
 def _instant_warmup(monkeypatch):
-    """Patch warm_maestras to a no-op so /health/ready reaches the 200 branch
-    without waiting on a real CIMA fetch."""
+    """No-op fixture kept only to preserve the existing test signatures.
 
-    async def _noop(app):
-        return None
-
-    # warm_maestras is referenced by lifespan via direct import — patch the
-    # binding the lifespan module uses, not the source module.
-    import app.lifespan as lifespan_mod
-
-    monkeypatch.setattr(lifespan_mod, "warm_maestras", _noop)
-    monkeypatch.setattr(lifespan_mod, "periodic_maestras_refresh", _noop)
+    Pre-v0.4.13 this monkey-patched ``warm_maestras`` /
+    ``periodic_maestras_refresh`` so ``/health/ready`` reached the 200
+    branch without waiting on a real CIMA fetch. v0.4.13 removed both
+    functions (the warmup was empirically a no-op against CIMA — see
+    `app/cache.py` for the long form). Tests that requested the
+    fixture used it as a dependency-free precondition; renaming it
+    would touch every caller for no benefit, so it stays as a stub.
+    """
     yield
 
 
@@ -175,7 +173,6 @@ def test_health_extra_merges_into_ready_payload(_instant_warmup) -> None:
         assert body["status"] == "ok"
         assert body["data_ready"] is True
         assert body["xls_rows"] == 1234
-        assert body["warmup"] == "completed"
 
 
 def test_health_extra_unready_flag_flips_to_503(_instant_warmup) -> None:

@@ -22,8 +22,6 @@ from fastapi import FastAPI
 from app.cache import (
     close_cache_backend,
     init_cache_backend,
-    periodic_maestras_refresh,
-    warm_maestras,
 )
 from app.cima_client import aclose_shared_client
 from app.config import settings as _settings
@@ -85,9 +83,6 @@ def build_lifespan(
                 logger.exception("Startup hook %s failed", getattr(hook, "__name__", hook))
                 raise
 
-        app.state.warmup_task = asyncio.create_task(warm_maestras(app))
-        app.state.refresh_task = asyncio.create_task(periodic_maestras_refresh(app))
-
         # Fire-and-forget outdated-version check. Logs a single WARNING
         # if PyPI has a newer release; never blocks startup.
         app.state.version_check_task = _schedule_version_check(_settings.mcp_aemps_version)
@@ -109,12 +104,11 @@ def build_lifespan(
                     except Exception:
                         logger.exception("Shutdown hook %s failed", getattr(hook, "__name__", hook))
 
-                for task_attr in ("warmup_task", "refresh_task", "version_check_task"):
-                    task = getattr(app.state, task_attr, None)
-                    if task and not task.done():
-                        task.cancel()
-                        with suppress(asyncio.CancelledError, Exception):
-                            await task
+                task = getattr(app.state, "version_check_task", None)
+                if task and not task.done():
+                    task.cancel()
+                    with suppress(asyncio.CancelledError, Exception):
+                        await task
 
                 await close_cache_backend(app)
                 # Drain the shared CIMA httpx client (v0.4.11 perf
