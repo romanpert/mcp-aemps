@@ -131,6 +131,38 @@ class Settings(BaseSettings):
         description="CORS allowed origins",
     )
 
+    # MCP transport security (DNS rebinding protection on the
+    # Streamable-HTTP /mcp endpoint). FastMCP ≥ 1.27 auto-enables this
+    # when host is localhost-y, with a default allowed_hosts list that
+    # rejects everything else (including FastAPI's TestClient
+    # ``testserver`` synthetic host). We expose a kill-switch + override
+    # so deployers can either disable it (CIMA data is public, the
+    # attack vector is low-impact) or extend the host list to cover
+    # their reverse-proxy hostname.
+    mcp_aemps_dns_rebinding_protection: bool = Field(
+        False,
+        description=(
+            "Enable MCP transport DNS rebinding protection (Host/Origin "
+            "header validation on /mcp). Default off — set to true in "
+            "production deployments behind a reverse proxy and configure "
+            "MCP_AEMPS_ALLOWED_HOSTS / MCP_AEMPS_ALLOWED_ORIGINS."
+        ),
+    )
+    mcp_aemps_allowed_hosts: Annotated[List[str], NoDecode] = Field(
+        default_factory=list,
+        description=(
+            "Comma-separated Host header values allowed on /mcp when DNS "
+            "rebinding protection is on. Wildcard ports supported "
+            "(``localhost:*``)."
+        ),
+    )
+    mcp_aemps_allowed_origins: Annotated[List[str], NoDecode] = Field(
+        default_factory=list,
+        description=(
+            "Comma-separated Origin header values allowed on /mcp when DNS rebinding protection is on."
+        ),
+    )
+
     max_results: int = Field(30, description="Maximum results per page")
 
     metrics_key: Optional[SecretStr] = Field(
@@ -138,8 +170,13 @@ class Settings(BaseSettings):
         description="If set, /internal/metrics requires a matching X-Metrics-Key header.",
     )
 
-    @field_validator("allowed_origins", mode="before")
-    def split_allowed_origins(cls, v):
+    @field_validator(
+        "allowed_origins",
+        "mcp_aemps_allowed_hosts",
+        "mcp_aemps_allowed_origins",
+        mode="before",
+    )
+    def split_csv_lists(cls, v):
         if isinstance(v, str):
             return [u.strip() for u in v.split(",") if u.strip()]
         return v

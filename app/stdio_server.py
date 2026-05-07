@@ -30,9 +30,11 @@ import logging
 from typing import Any, Sequence
 
 from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ContentBlock
 
 from app.completions import register_completions
+from app.config import settings as _settings
 from app.content_links import (
     build_search_response,
     links_for_medicamentos,
@@ -128,10 +130,42 @@ def build_server(
       construction helpers. stdio is not affected — process-local access
       is not gated by OAuth.
     """
+    # MCP transport security: FastMCP ≥ 1.27 auto-enables DNS rebinding
+    # protection when host is localhost-y, with an allowed_hosts list
+    # that rejects both FastAPI TestClient's ``testserver`` and any
+    # user-supplied reverse-proxy hostname. We always pass an explicit
+    # TransportSecuritySettings so behaviour is deterministic and
+    # controllable via the env vars MCP_AEMPS_DNS_REBINDING_PROTECTION /
+    # MCP_AEMPS_ALLOWED_HOSTS / MCP_AEMPS_ALLOWED_ORIGINS (see
+    # app.config.Settings).
+    transport_security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=_settings.mcp_aemps_dns_rebinding_protection,
+        allowed_hosts=_settings.mcp_aemps_allowed_hosts
+        or [
+            "127.0.0.1:*",
+            "localhost:*",
+            "[::1]:*",
+            "127.0.0.1",
+            "localhost",
+            "[::1]",
+            # FastAPI TestClient default — keeps the test surface working
+            # without leaking real attack surface (no DNS resolves to
+            # ``testserver`` in the wild).
+            "testserver",
+        ],
+        allowed_origins=_settings.mcp_aemps_allowed_origins
+        or [
+            "http://127.0.0.1:*",
+            "http://localhost:*",
+            "http://[::1]:*",
+        ],
+    )
+
     fastmcp_kwargs: dict[str, Any] = {
         "name": "mcp-aemps",
         "instructions": MCP_AEMPS_SYSTEM_PROMPT,
         "streamable_http_path": streamable_http_path,
+        "transport_security": transport_security,
     }
     if auth_settings is not None:
         fastmcp_kwargs["auth"] = auth_settings

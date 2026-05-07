@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.5] — 2026-05-07
+
+### Fixed
+
+- **MCP transport security 421 against `testserver`** (regression
+  introduced by FastMCP ≥ 1.27 auto-enabling DNS rebinding protection
+  when host is localhost). The OAuth integration test
+  `test_post_mcp_with_valid_token_passes_auth_layer` failed in CI on
+  Python 3.11/3.12/3.13 with `421 Misdirected Request — Invalid Host
+  header: testserver` because the new default allowed-hosts list
+  `[127.0.0.1:*, localhost:*, [::1]:*]` rejects FastAPI TestClient's
+  synthetic Host. Local runs missed it because the project's pinned
+  `mcp` was still 1.13.x (no auto-protection).
+- The mismatch was masked because the CI was successfully running
+  `pip install -e .` against the unpinned `mcp>=1.13.0`, which now
+  resolves to 1.27.0 on a clean runner — every fresh CI run picked up
+  the breaking change while local devs stayed on stale wheels.
+
+### Changed
+
+- `app.stdio_server.build_server` now constructs an explicit
+  `TransportSecuritySettings` for FastMCP, controlled by three new
+  env vars in `app.config.Settings`:
+  - `MCP_AEMPS_DNS_REBINDING_PROTECTION` — bool, default **off**
+    (matches mcp 1.13.x prior behaviour; CIMA data is public so the
+    attack vector is low-impact, and the OAuth audience binding
+    handles credential-replay risk independently). Set to `true` in
+    production deployments behind a reverse proxy.
+  - `MCP_AEMPS_ALLOWED_HOSTS` — comma-separated CSV of allowed Host
+    header values. Defaults to a localhost-friendly set
+    (`127.0.0.1:*`, `localhost:*`, `[::1]:*`, the same without ports,
+    plus the FastAPI TestClient `testserver` synthetic host —
+    `testserver` resolves to nothing in the wild so it doesn't expand
+    real attack surface).
+  - `MCP_AEMPS_ALLOWED_ORIGINS` — same, for Origin header.
+- `split_csv_lists` validator unified across `allowed_origins`,
+  `mcp_aemps_allowed_hosts`, `mcp_aemps_allowed_origins`.
+
 ## [0.4.4] — 2026-05-07
 
 ### Fixed
