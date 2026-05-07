@@ -323,7 +323,7 @@ Los prompts **dirigidos a pacientes** (`material_visual_paciente`, `info_medicam
 
 ## Integración con Claude Code hooks
 
-El [sistema de hooks de Claude Code](https://docs.anthropic.com/claude-code/hooks) ejecuta comandos shell client-side alrededor de cada invocación de tool, incluyendo llamadas a servidores MCP como mcp-aemps. El matcher `mcp__mcp-aemps__*` captura cada herramienta expuesta por este servidor. Tres recetas concretas para añadir a `~/.claude/settings.json`:
+El [sistema de hooks de Claude Code](https://docs.anthropic.com/claude-code/hooks) ejecuta comandos shell client-side alrededor de cada invocación de tool, incluyendo llamadas a servidores MCP como mcp-aemps. El matcher `mcp__mcp-aemps__*` captura cada herramienta expuesta por este servidor. Dos recetas concretas para añadir a `~/.claude/settings.json`:
 
 ### 1 · Auditar cada llamada mcp-aemps a un log JSONL
 
@@ -348,9 +348,6 @@ El [sistema de hooks de Claude Code](https://docs.anthropic.com/claude-code/hook
 ```
 
 El hook recibe la llamada de tool como JSON por stdin; `jq` la aplana a una línea por llamada. Rota `~/.claude/audit/` con `logrotate` o tu agente SIEM.
-
-
-El exit code `2` aborta la llamada al tool y devuelve el mensaje stderr al modelo — Claude Code lo expone como un tool denied con razón.
 
 ### 2 · Enviar latencia por tool a un SIEM
 

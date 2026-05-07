@@ -325,7 +325,7 @@ The **patient-facing** prompts (`material_visual_paciente`, `info_medicamento_pa
 
 ## Integrating with Claude Code hooks
 
-Claude Code's [hooks system](https://docs.anthropic.com/claude-code/hooks) fires shell commands client-side around every tool invocation, including calls to MCP servers like mcp-aemps. The matcher `mcp__mcp-aemps__*` catches every tool exposed by this server. Three concrete recipes to drop into `~/.claude/settings.json`:
+Claude Code's [hooks system](https://docs.anthropic.com/claude-code/hooks) fires shell commands client-side around every tool invocation, including calls to MCP servers like mcp-aemps. The matcher `mcp__mcp-aemps__*` catches every tool exposed by this server. Two concrete recipes to drop into `~/.claude/settings.json`:
 
 ### 1 · Audit every mcp-aemps call to a JSONL log
 

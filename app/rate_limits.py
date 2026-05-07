@@ -9,15 +9,15 @@ medicamentos / presentaciones / fichas técnicas. The previous caps
 the new caps still protect upstream + multi-tenant fairness without
 acting as a candado on solo users.
 
-| Tier      | Limit     | Burst budget    | Use case                              |
-|-----------|-----------|-----------------|---------------------------------------|
-| local     | 300/min   | ~5/s sustained  | in-process operations (no upstream)   |
-| standard  | 120/min   | ~2/s sustained  | single CIMA call                      |
-| document  | 30/min    | ~1 every 2s     | HTML / PDF document fetches           |
-| heavy     | 20/min    | ~1 every 3s     | batch / multi-call fan-out endpoints  |
+| Tier      | Limit     | Burst budget     | Use case                             |
+|-----------|-----------|------------------|--------------------------------------|
+| local     | 500/min   | ~8/s sustained   | in-process operations (no upstream)  |
+| standard  | 300/min   | ~5/s sustained   | single CIMA call                     |
+| document  | 200/min   | ~3/s sustained   | HTML / PDF document fetches          |
+| heavy     | 100/min   | ~1.6/s sustained | batch / multi-call fan-out endpoints |
 
 The actual upstream-courtesy guarantee is the global
-``CIMA_FANOUT_SEMAPHORE`` (16 concurrent — bumped from 8 in v0.4.8).
+``CIMA_FANOUT_SEMAPHORE`` (32 concurrent — bumped from 16 in v0.4.9).
 Per-tier limits are about per-client fairness; the semaphore is what
 keeps total concurrent CIMA requests bounded across all clients.
 
@@ -40,28 +40,29 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Per-client tiers (per minute). See module docstring for the rationale
-# behind each value — 2.5x-3.3x the v0.4.7 baseline so legitimate agent
-# bursts (10-30 calls in a few seconds when reasoning across CIMA) don't
-# trip the limiter on the first turn of a conversation.
-LIMIT_LOCAL = RateLimitItemPerMinute(300)
-LIMIT_STANDARD = RateLimitItemPerMinute(120)
-LIMIT_DOCUMENT = RateLimitItemPerMinute(30)
-LIMIT_HEAVY = RateLimitItemPerMinute(20)
+# Per-client tiers (per minute). See module docstring for the rationale.
+# Bumped again in v0.4.9 (~1.7-6.7× the v0.4.8 baseline) for power users
+# running several agents in parallel against the same instance — pharma
+# regulatory teams often have 5-10 simultaneous Claude Code / Cursor
+# sessions on the same intranet IP, and the v0.4.8 caps started biting.
+LIMIT_LOCAL = RateLimitItemPerMinute(500)
+LIMIT_STANDARD = RateLimitItemPerMinute(300)
+LIMIT_DOCUMENT = RateLimitItemPerMinute(200)
+LIMIT_HEAVY = RateLimitItemPerMinute(100)
 
 # Global fan-out cap: max concurrent CIMA requests this server makes
-# upstream. Bumped 8 → 16 alongside the per-tier increase — single agents
-# now legitimately do 4-8 parallel calls during fan-out (listar_notas
-# across 6 nregistros, problemas_suministro multi-CN), and 8 was the
-# observed bottleneck. 16 still keeps a hard ceiling on what we send to
-# AEMPS regardless of client count.
-CIMA_FANOUT_LIMIT = 16
+# upstream. Bumped 16 → 32 — modern CIMA backends (post 2025-Q3 upgrade)
+# handle this comfortably, and 16 was the observed bottleneck for
+# multi-tenant pharma deployments. 32 still keeps a hard ceiling on
+# upstream pressure regardless of client count.
+CIMA_FANOUT_LIMIT = 32
 CIMA_FANOUT_SEMAPHORE: asyncio.Semaphore = asyncio.Semaphore(CIMA_FANOUT_LIMIT)
 
 # Per-batch-request fan-out cap: how many parallel CIMA calls a single
-# /batch-style endpoint can spawn. Lower than the global so one batch
-# request can't monopolise the upstream channel. Bumped 4 → 8 to match.
-BATCH_FANOUT_LIMIT = 8
+# /batch-style endpoint can spawn. Bumped 8 → 20 — large batches like
+# `listar_notas(nregistro=[<15-20 nregistros>])` (one per drug in a
+# pharmacist's vade-mecum query) now run wide instead of serialising.
+BATCH_FANOUT_LIMIT = 20
 
 _storage: Optional[Storage] = None
 _limiter: Optional[MovingWindowRateLimiter] = None

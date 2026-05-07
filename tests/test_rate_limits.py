@@ -17,16 +17,15 @@ def test_tier_limits_match_documented_values() -> None:
         LIMIT_STANDARD,
     )
 
-    # v0.4.8 — limits bumped 2.5-3.3x to fit agent burst patterns
-    # (10-30 tool calls in a few seconds during one model turn) without
-    # blocking solo users. Upstream courtesy still enforced via the
-    # CIMA_FANOUT_SEMAPHORE (16 concurrent ceiling).
-    assert LIMIT_LOCAL.amount == 300
-    assert LIMIT_STANDARD.amount == 120
-    assert LIMIT_DOCUMENT.amount == 30
-    assert LIMIT_HEAVY.amount == 20
-    assert CIMA_FANOUT_LIMIT == 16
-    assert BATCH_FANOUT_LIMIT == 8
+    # v0.4.9 — limits bumped again to fit multi-agent pharma intranet
+    # deployments (5-10 simultaneous sessions on the same IP). Upstream
+    # courtesy still enforced via CIMA_FANOUT_SEMAPHORE (32 ceiling).
+    assert LIMIT_LOCAL.amount == 500
+    assert LIMIT_STANDARD.amount == 300
+    assert LIMIT_DOCUMENT.amount == 200
+    assert LIMIT_HEAVY.amount == 100
+    assert CIMA_FANOUT_LIMIT == 32
+    assert BATCH_FANOUT_LIMIT == 20
 
 
 def test_global_semaphore_caps_concurrent_acquisitions() -> None:

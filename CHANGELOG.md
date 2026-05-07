@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.9] — 2026-05-07
+
+### Changed
+
+- **Rate limits bumped again** to fit multi-agent pharma intranet
+  deployments (5-10 simultaneous Claude Code / Cursor sessions on the
+  same NAT IP). v0.4.8 caps started biting on real-world workloads.
+  | Tier      | v0.4.8       | v0.4.9       |
+  |-----------|-------------:|-------------:|
+  | local     | `300/min`    | `500/min`    |
+  | standard  | `120/min`    | `300/min`    |
+  | document  | `30/min`     | `200/min`    |
+  | heavy     | `20/min`     | `100/min`    |
+  | global    | 16 conc.     | 32 conc.     |
+  | batch     | 8 conc.      | 20 conc.     |
+  CIMA's backend (post 2025-Q3 upgrade) handles the wider concurrency
+  comfortably; the global semaphore stays the hard ceiling on
+  upstream pressure regardless of client count.
+
+### Cleaned
+
+- Orphaned exit-code-2 sentence left over from the removed
+  `descargar_imagenes` hook section in `README.md` ("Tres recetas" →
+  "Dos recetas"; matched in `README.en.md`).
+
+### Marketing (out-of-tree, gitignored)
+
+- New Astro 5 + Tailwind landing site scaffolded at
+  `.marketing/site/`. Lives under `.marketing/` so nothing leaks
+  into the public repo. Hero, install tabs, feature grid, tool
+  catalogue grouped by category, `/moxi` reserved page for the
+  Premium tier, SEO meta + OpenGraph + JSON-LD. Single sources of
+  truth at `src/data/installCommands.ts` and `src/data/tools.ts`
+  mirror the canonical README + `_mcp_constants_es.py`. Deploy
+  recipe documented for a separate `romanpert/mcp-aemps-site`
+  repo on GitHub Pages.
+
 ## [0.4.8] — 2026-05-07
 
 ### Changed
