@@ -55,6 +55,31 @@ def _detect_default_locale() -> str:
     return "es"
 
 
+def _default_log_dir() -> str:
+    """Per-user, writable-by-default log directory.
+
+    Uses ``app.runtime_state.state_dir()`` so the path matches the rest
+    of the per-user runtime artefacts (PID file, runtime.json) — one
+    directory per user, OS-canonical:
+
+    - Linux:   ``$XDG_STATE_HOME/mcp-aemps/logs`` (or ``~/.local/state/...``)
+    - macOS:   ``~/Library/Application Support/mcp-aemps/logs``
+    - Windows: ``%LOCALAPPDATA%\\mcp-aemps\\logs``
+
+    Critical for the Claude Desktop / uvx launch path: the host process
+    spawns ``uvx mcp-aemps stdio`` with CWD wherever Claude Desktop
+    happens to be (often a system path with no write access). The old
+    default ``./logs`` mkdir'ed there and crashed Settings construction
+    with ``WinError 5: Access denied``, taking the whole server down.
+    """
+    # Imported here (and not at module top) to avoid a circular: settings
+    # is imported by some modules at import time. ``runtime_state`` is
+    # standalone with no project deps so it's safe at call time.
+    from app.runtime_state import state_dir
+
+    return str(state_dir() / "logs")
+
+
 def _mkdir_private(path_str: str) -> str:
     p = Path(path_str)
     p.mkdir(parents=True, exist_ok=True)
@@ -123,7 +148,16 @@ class Settings(BaseSettings):
 
     log_level: str = Field("INFO", description="Logging level")
     log_retention_days: int = Field(90, description="Log retention in days")
-    log_dir: str = Field("./logs", description="Log directory")
+    log_dir: str = Field(
+        default_factory=_default_log_dir,
+        description=(
+            "Log directory. Defaults to a per-user writable path "
+            "matching app.runtime_state.state_dir(); falls back to "
+            "the system temp dir if that path is not writable, and "
+            "finally degrades to console-only logging. Set explicitly "
+            "to override (e.g. ``LOG_DIR=/var/log/mcp-aemps``)."
+        ),
+    )
     log_stacktraces: bool = Field(False, description="Print tracebacks in logs")
 
     allowed_origins: Annotated[List[str], NoDecode] = Field(
@@ -228,10 +262,29 @@ class Settings(BaseSettings):
 
     @field_validator("log_dir")
     def ensure_log_dir_exists(cls, v):
-        try:
-            return _mkdir_private(v)
-        except Exception as e:
-            raise ValueError(f"Could not prepare log dir '{v}': {e}")
+        """Best-effort log dir resolution. NEVER raises — settings
+        construction must always succeed so the server can boot under
+        adverse environments (Claude Desktop launching uvx with a
+        read-only CWD, Docker without a volume mount, sandboxed
+        contexts).
+
+        Order:
+          1. The configured/default path.
+          2. ``tempfile.gettempdir()`` / ``mcp-aemps-logs``.
+          3. Empty string — ``logging_setup`` then skips the file
+             handler entirely (console-only logging)."""
+        import tempfile
+
+        for candidate in (v, str(Path(tempfile.gettempdir()) / "mcp-aemps-logs")):
+            if not candidate:
+                continue
+            try:
+                return _mkdir_private(candidate)
+            except Exception:
+                continue
+        # Last resort: console-only. logging_setup handles "" by
+        # skipping the rotating file handler.
+        return ""
 
     @field_validator("log_level")
     def validate_log_level(cls, v):

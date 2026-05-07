@@ -389,6 +389,11 @@ def _print_install_result(res) -> None:
     icon = _INSTALL_ICONS.get(res.action, "•")
     console.print(f"{icon}  [bold]{res.client}[/]  ({res.action}) — {res.message}")
     console.print(f"    [dim]config: {res.config_path}[/dim]")
+    for warning in getattr(res, "warnings", ()) or ():
+        # Style: yellow for prereq warnings (WARNING:), cyan for info
+        # notes (NOTE:). Both are informational; don't fail the install.
+        style = "yellow" if warning.startswith("WARNING") else "cyan"
+        console.print(f"    [{style}]{warning}[/{style}]")
 
 
 @install_app.callback(invoke_without_command=True)

@@ -65,10 +65,6 @@ def _rotator(source: str, dest: str) -> None:
 
 
 def configure_logging() -> logging.Logger:
-    log_dir = Path(settings.log_dir)
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / "mcp_aemps.log"
-
     log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
 
     root = logging.getLogger()
@@ -90,18 +86,35 @@ def configure_logging() -> logging.Logger:
     uv_access.handlers = []
     uv_access.propagate = False
 
-    file_handler = TimedRotatingFileHandler(
-        filename=str(log_file),
-        when="midnight",
-        interval=1,
-        backupCount=settings.log_retention_days,
-        encoding="utf-8",
-        utc=True,
-    )
-    file_handler.namer = _namer
-    file_handler.rotator = _rotator
-    file_handler.setFormatter(fmt)
-    root.addHandler(file_handler)
+    # File handler is best-effort. ``settings.log_dir`` is empty when no
+    # writable path was found (sandboxed Claude Desktop launches, Docker
+    # without a log mount, etc.) — in that case we run with console-only
+    # logging instead of crashing the process.
+    if settings.log_dir:
+        try:
+            log_dir = Path(settings.log_dir)
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_file = log_dir / "mcp_aemps.log"
+            file_handler = TimedRotatingFileHandler(
+                filename=str(log_file),
+                when="midnight",
+                interval=1,
+                backupCount=settings.log_retention_days,
+                encoding="utf-8",
+                utc=True,
+            )
+            file_handler.namer = _namer
+            file_handler.rotator = _rotator
+            file_handler.setFormatter(fmt)
+            root.addHandler(file_handler)
+        except Exception as exc:  # noqa: BLE001
+            # Mirror the file-handler failure to stderr so a deployer
+            # debugging "where are my logs?" finds the trail.
+            root.warning(
+                "File logging disabled: could not open %s (%s)",
+                settings.log_dir,
+                type(exc).__name__,
+            )
 
     logger = logging.getLogger("mcp.aemps")
     if logger.isEnabledFor(logging.DEBUG):

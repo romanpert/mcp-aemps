@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/mcp_aemps_logo_v2.jpg" alt="mcp-aemps" width="180"/>
+  <img src="https://raw.githubusercontent.com/romanpert/mcp-aemps/master/docs/mcp_aemps_logo_v2.jpg" alt="mcp-aemps" width="180"/>
 </p>
 
 <h1 align="center">mcp-aemps</h1>
@@ -14,9 +14,13 @@
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/mcp-aemps/"><img src="https://img.shields.io/pypi/v/mcp-aemps?color=blue" alt="PyPI"/></a>
+  <a href="https://pypi.org/project/mcp-aemps/"><img src="https://img.shields.io/pypi/v/mcp-aemps?color=blue&label=PyPI" alt="PyPI"/></a>
+  <a href="https://www.npmjs.com/package/mcp-aemps"><img src="https://img.shields.io/npm/v/mcp-aemps?color=cb3837&label=npm" alt="npm"/></a>
+  <a href="https://github.com/romanpert/mcp-aemps/pkgs/container/mcp-aemps"><img src="https://img.shields.io/badge/ghcr.io-mcp--aemps-2496ed?logo=docker&logoColor=white" alt="GHCR"/></a>
   <a href="https://pypi.org/project/mcp-aemps/"><img src="https://img.shields.io/pypi/pyversions/mcp-aemps" alt="Python versions"/></a>
-  <a href="https://pypi.org/project/mcp-aemps/"><img src="https://img.shields.io/pypi/dm/mcp-aemps?color=blue" alt="Downloads"/></a>
+  <br/>
+  <a href="https://pepy.tech/project/mcp-aemps"><img src="https://static.pepy.tech/badge/mcp-aemps" alt="PyPI downloads"/></a>
+  <a href="https://pypi.org/project/mcp-aemps/"><img src="https://img.shields.io/pypi/dm/mcp-aemps?color=blue&label=PyPI%2Fmonth" alt="PyPI monthly"/></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-green" alt="License"/></a>
   <a href="https://github.com/romanpert/mcp-aemps/actions/workflows/ci.yml"><img src="https://github.com/romanpert/mcp-aemps/actions/workflows/ci.yml/badge.svg" alt="CI"/></a>
   <a href="https://registry.modelcontextprotocol.io/v0/servers?search=mcp-aemps"><img src="https://img.shields.io/badge/MCP%20Registry-listed-purple" alt="MCP Registry"/></a>
@@ -194,7 +198,7 @@ uvx mcp-aemps stdio
 MCP_AEMPS_LOCALE=en uvx mcp-aemps stdio
 ```
 
-Since v0.2.11 the **OS locale is auto-detected** (`$LC_ALL` / `$LANG` / `$LANGUAGE`): English-tagged systems get `en`, everything else (including the POSIX `C` locale and unrecognised locales) falls back to `es` because CIMA's source data is Spanish. An explicit `MCP_AEMPS_LOCALE` always wins over the auto-detection.
+The **OS locale is auto-detected** (`$LC_ALL` / `$LANG` / `$LANGUAGE`): English-tagged systems get `en`, everything else (including the POSIX `C` locale and unrecognised locales) falls back to `es` because CIMA's source data is Spanish. An explicit `MCP_AEMPS_LOCALE` always wins over the auto-detection.
 
 Since v0.2.9 the **full** prompt catalogue (descriptions + bodies + patient-facing disclaimer) ships in both locales. Both locales register the same 10 prompt names with the same arg signatures — clients hard-coding prompt names keep working when you flip the locale.
 
@@ -347,31 +351,7 @@ Useful for GMP Annex 11 / EMA GVP audit trails — full record of which tool was
 
 The hook receives the tool call as JSON on stdin; `jq` flattens it to one line per call. Rotate `~/.claude/audit/` with `logrotate` or your SIEM agent.
 
-### 2 · Gate image downloads behind explicit confirmation
-
-`descargar_imagenes` returns base64-encoded medication images that can be large and bandwidth-expensive. Block the call unless the user has opted in via an env-var flag.
-
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "mcp__mcp-aemps__descargar_imagenes",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "[ \"$MCP_AEMPS_ALLOW_IMAGES\" = '1' ] || { echo 'Set MCP_AEMPS_ALLOW_IMAGES=1 to authorise image downloads' >&2; exit 2; }"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-Exit code `2` aborts the tool call and returns the stderr message to the model — Claude Code surfaces it as a denied tool with reason.
-
-### 3 · Ship per-tool latency to a SIEM
+### 2 · Ship per-tool latency to a SIEM
 
 Pair `PreToolUse` (timer start) with `PostToolUse` (timer stop) and POST the delta plus tool name to your SIEM ingestion endpoint.
 

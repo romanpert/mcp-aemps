@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/mcp_aemps_logo_v2.jpg" alt="mcp-aemps" width="180"/>
+  <img src="https://raw.githubusercontent.com/romanpert/mcp-aemps/master/docs/mcp_aemps_logo_v2.jpg" alt="mcp-aemps" width="180"/>
 </p>
 
 <h1 align="center">mcp-aemps</h1>
@@ -14,9 +14,13 @@
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/mcp-aemps/"><img src="https://img.shields.io/pypi/v/mcp-aemps?color=blue" alt="PyPI"/></a>
+  <a href="https://pypi.org/project/mcp-aemps/"><img src="https://img.shields.io/pypi/v/mcp-aemps?color=blue&label=PyPI" alt="PyPI"/></a>
+  <a href="https://www.npmjs.com/package/mcp-aemps"><img src="https://img.shields.io/npm/v/mcp-aemps?color=cb3837&label=npm" alt="npm"/></a>
+  <a href="https://github.com/romanpert/mcp-aemps/pkgs/container/mcp-aemps"><img src="https://img.shields.io/badge/ghcr.io-mcp--aemps-2496ed?logo=docker&logoColor=white" alt="GHCR"/></a>
   <a href="https://pypi.org/project/mcp-aemps/"><img src="https://img.shields.io/pypi/pyversions/mcp-aemps" alt="Python versions"/></a>
-  <a href="https://pypi.org/project/mcp-aemps/"><img src="https://img.shields.io/pypi/dm/mcp-aemps?color=blue" alt="Downloads"/></a>
+  <br/>
+  <a href="https://pepy.tech/project/mcp-aemps"><img src="https://static.pepy.tech/badge/mcp-aemps" alt="PyPI downloads"/></a>
+  <a href="https://pypi.org/project/mcp-aemps/"><img src="https://img.shields.io/pypi/dm/mcp-aemps?color=blue&label=PyPI%2Fmonth" alt="PyPI monthly"/></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-green" alt="License"/></a>
   <a href="https://github.com/romanpert/mcp-aemps/actions/workflows/ci.yml"><img src="https://github.com/romanpert/mcp-aemps/actions/workflows/ci.yml/badge.svg" alt="CI"/></a>
   <a href="https://registry.modelcontextprotocol.io/v0/servers?search=mcp-aemps"><img src="https://img.shields.io/badge/MCP%20Registry-listed-purple" alt="MCP Registry"/></a>
@@ -192,7 +196,7 @@ uvx mcp-aemps stdio
 MCP_AEMPS_LOCALE=en uvx mcp-aemps stdio
 ```
 
-Desde v0.2.11, **se auto-detecta el idioma del sistema operativo** (`$LC_ALL` / `$LANG` / `$LANGUAGE`): sistemas en inglés reciben `en`, todo lo demás (incluyendo locale POSIX `C` y locales no reconocidos) cae a `es` porque la fuente de datos CIMA es española. Una `MCP_AEMPS_LOCALE` explícita siempre gana sobre la auto-detección.
+**Auto-detección del idioma del sistema operativo** (`$LC_ALL` / `$LANG` / `$LANGUAGE`): sistemas en inglés reciben `en`, todo lo demás (incluyendo locale POSIX `C` y locales no reconocidos) cae a `es` porque la fuente de datos CIMA es española. Una `MCP_AEMPS_LOCALE` explícita siempre gana sobre la auto-detección.
 
 Desde v0.2.9 el catálogo **completo** de prompts (descripciones + bodies + disclaimer dirigido a pacientes) se entrega en ambos idiomas. Ambos locales registran los mismos 10 nombres de prompt con las mismas signaturas — los clientes que hardcodean nombres siguen funcionando al cambiar de idioma.
 
@@ -345,31 +349,10 @@ El [sistema de hooks de Claude Code](https://docs.anthropic.com/claude-code/hook
 
 El hook recibe la llamada de tool como JSON por stdin; `jq` la aplana a una línea por llamada. Rota `~/.claude/audit/` con `logrotate` o tu agente SIEM.
 
-### 2 · Gatear descargas de imágenes tras confirmación explícita
-
-`descargar_imagenes` devuelve imágenes de medicamentos codificadas en base64 que pueden ser grandes y costosas en ancho de banda. Bloquea la llamada salvo que el usuario haya optado in vía un flag de env-var.
-
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "mcp__mcp-aemps__descargar_imagenes",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "[ \"$MCP_AEMPS_ALLOW_IMAGES\" = '1' ] || { echo 'Set MCP_AEMPS_ALLOW_IMAGES=1 to authorise image downloads' >&2; exit 2; }"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
 
 El exit code `2` aborta la llamada al tool y devuelve el mensaje stderr al modelo — Claude Code lo expone como un tool denied con razón.
 
-### 3 · Enviar latencia por tool a un SIEM
+### 2 · Enviar latencia por tool a un SIEM
 
 Empareja `PreToolUse` (start del timer) con `PostToolUse` (stop del timer) y haz POST del delta más el nombre de tool a tu endpoint de ingest del SIEM.
 

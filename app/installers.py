@@ -52,6 +52,28 @@ class InstallResult:
     config_path: Path
     action: str  # "added" | "updated" | "unchanged" | "removed"
     message: str
+    warnings: tuple[str, ...] = ()
+
+
+def _check_command_on_path(command: str) -> str | None:
+    """Return a human-readable warning if ``command`` is not on PATH,
+    else ``None``. Used by every installer to surface missing
+    prerequisites at install-time instead of at server-launch-time
+    (when the host swallows the failure as a generic "Server
+    disconnected"). Never blocks the install — the user might be
+    configuring a machine where the tool is installed under a
+    different alias or PATH gets refreshed later."""
+    if shutil.which(command):
+        return None
+    install_hint = {
+        "uvx": "Install uv: https://docs.astral.sh/uv/getting-started/installation/",
+        "uv": "Install uv: https://docs.astral.sh/uv/getting-started/installation/",
+        "npx": "Install Node.js (≥ 18): https://nodejs.org/en/download",
+        "npm": "Install Node.js (≥ 18): https://nodejs.org/en/download",
+        "pipx": "Install pipx: https://pipx.pypa.io/stable/installation/",
+    }.get(command, "")
+    suffix = f"  {install_hint}" if install_hint else ""
+    return f"WARNING: '{command}' not found on PATH — config written but the client will fail to launch the server until you install it.{suffix}"
 
 
 def _atomic_write_json(path: Path, data: dict) -> None:
@@ -144,22 +166,47 @@ def install_claude_desktop(
     config = _read_json(path)
     config.setdefault("mcpServers", {})
 
+    warnings: list[str] = []
+
     if transport == "stdio":
         desired: dict[str, Any] = {"command": "uvx", "args": ["mcp-aemps@latest", "stdio"]}
         message_suffix = "(uvx auto-launch); restart Claude Desktop"
+        if w := _check_command_on_path("uvx"):
+            warnings.append(w)
     else:
         url = url or _default_url()
         desired = {"command": "npx", "args": ["-y", "mcp-remote", url]}
         message_suffix = f"-> {url} (mcp-remote bridge); restart Claude Desktop"
+        if w := _check_command_on_path("npx"):
+            warnings.append(w)
+        # mcp-remote bridges to a server you must run yourself —
+        # without it, the bridge fails with ECONNREFUSED at launch.
+        warnings.append(
+            f"NOTE: http transport requires a running server at {url} "
+            f"(start it with `mcp-aemps up`). The stdio transport "
+            f"(default) does not need a separate server."
+        )
 
     existing = config["mcpServers"].get(server_key)
     if existing == desired:
-        return InstallResult("Claude Desktop", path, "unchanged", f"{server_key} already configured")
+        return InstallResult(
+            "Claude Desktop",
+            path,
+            "unchanged",
+            f"{server_key} already configured",
+            warnings=tuple(warnings),
+        )
 
     action = "updated" if existing else "added"
     config["mcpServers"][server_key] = desired
     _atomic_write_json(path, config)
-    return InstallResult("Claude Desktop", path, action, f"{server_key} {message_suffix}")
+    return InstallResult(
+        "Claude Desktop",
+        path,
+        action,
+        f"{server_key} {message_suffix}",
+        warnings=tuple(warnings),
+    )
 
 
 def uninstall_claude_desktop(

@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.7] — 2026-05-07
+
+### Fixed
+
+- **Critical: server crashed on launch from Claude Desktop / uvx with
+  `WinError 5: Access denied: 'logs'`**. The default `log_dir` was the
+  relative `./logs`, so when Claude Desktop spawned `uvx mcp-aemps stdio`
+  with a CWD that wasn't writable (system32, sandboxed contexts) the
+  Settings validator failed and the whole process aborted before any
+  request landed. The default is now the per-user OS-canonical path
+  (`app.runtime_state.state_dir() / "logs"` — `~/.local/state` /
+  `~/Library/Application Support` / `%LOCALAPPDATA%`), the validator
+  no longer raises (falls back to the system temp dir, then to
+  console-only logging), and `logging_setup` skips the file handler
+  gracefully when no writable path is available.
+
+### Changed
+
+- **CLI install command surfaces missing prerequisites at install
+  time.** `mcp-aemps install` now checks whether `uvx` (stdio
+  transport) or `npx` (mcp-remote bridge) is on `PATH` and prints a
+  yellow `WARNING:` with install instructions when it isn't. The http
+  transport additionally prints a `NOTE:` reminding the user that
+  the bridge target requires a separately-running `mcp-aemps up`
+  server — the `ECONNREFUSED` failure mode the bridge would otherwise
+  hit on first connect was the most common "Server disconnected"
+  source.
+- README badges expanded: npm version, Docker GHCR badge, separate
+  total-downloads via pepy.tech alongside the PyPI per-month
+  shield. README image switched to an absolute
+  `raw.githubusercontent.com` URL so PyPI's renderer can fetch it
+  (relative paths only work on GitHub).
+
+### Removed
+
+- README sections referencing `descargar_imagenes` (moved to
+  Premium / enterprise tier — the tool was never first-class CIMA
+  REST and image bytes come from `cima.aemps.es/cima/fotos/...`,
+  outside the documented surface).
+- Hardcoded `Desde v0.2.11` / `Since v0.2.11` version pins in both
+  README locales — the historical pin is meaningless now and stale
+  references on the PyPI page confuse readers who expect them to
+  reflect the latest version.
+
 ## [0.4.6] — 2026-05-07
 
 Two efficiency / scalability improvements that fall inside the
