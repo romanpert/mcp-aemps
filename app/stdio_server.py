@@ -16,7 +16,14 @@ Run with:  python -m app.stdio_server
 Or via:    mcp-aemps stdio
 """
 
-from __future__ import annotations
+# Note: ``from __future__ import annotations`` is intentionally NOT imported
+# here. FastMCP's ``func_metadata`` resolves return-type annotations using
+# the function's ``__globals__`` to derive ``outputSchema``. After
+# ``functools.wraps`` is applied by ``wrap_stdio_tool``, the wrapper's
+# ``__globals__`` points at ``app.tool_hooks`` — which doesn't import the
+# response models. Eager (non-stringified) annotations sidestep that lookup
+# entirely. PEP 585 / PEP 604 syntax (``list[str]``, ``str | None``) is
+# runtime-supported on the Python ≥ 3.11 we ship for.
 
 import asyncio
 import logging
@@ -25,6 +32,9 @@ from typing import Any, Sequence
 from mcp.server.fastmcp import FastMCP
 
 from app.core import (
+    CimaCollectionResponse,
+    CimaPaginatedResponse,
+    CimaResponse,
     core_buscar_en_ficha_tecnica,
     core_buscar_medicamentos,
     core_buscar_vmpp,
@@ -147,7 +157,7 @@ def build_server(
     async def obtener_medicamento(
         cn: str | None = None,
         nregistro: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> CimaResponse:
         return await core_obtener_medicamento(cn=cn, nregistro=nregistro)
 
     @_tool(description=medicamentos_description)
@@ -175,7 +185,7 @@ def build_server(
         psicotropo: int | None = None,
         estuopsico: int | None = None,
         pagina: int = 1,
-    ) -> dict[str, Any]:
+    ) -> CimaPaginatedResponse:
         return await core_buscar_medicamentos(
             nombre=nombre,
             laboratorio=laboratorio,
@@ -203,7 +213,7 @@ def build_server(
 
     @_tool(description=buscar_ficha_tecnica_description)
     @_wrap
-    async def buscar_en_ficha_tecnica(reglas: list[dict[str, Any]]) -> dict[str, Any]:
+    async def buscar_en_ficha_tecnica(reglas: list[dict[str, Any]]) -> CimaResponse:
         return await core_buscar_en_ficha_tecnica(reglas)
 
     # ------------------------------------------------------------------
@@ -222,7 +232,7 @@ def build_server(
         psicotropo: int | None = None,
         estuopsico: int | None = None,
         pagina: int = 1,
-    ) -> dict[str, Any]:
+    ) -> CimaPaginatedResponse:
         return await core_listar_presentaciones(
             cn=cn,
             nregistro=nregistro,
@@ -238,7 +248,7 @@ def build_server(
 
     @_tool(description=presentacion_description)
     @_wrap
-    async def obtener_presentacion(cn: list[str]) -> dict[str, Any]:
+    async def obtener_presentacion(cn: list[str]) -> CimaCollectionResponse:
         return await core_obtener_presentacion(cn=cn)
 
     @_tool(description=vmpp_description)
@@ -252,7 +262,7 @@ def build_server(
         nombre: str | None = None,
         modoArbol: int | None = None,
         pagina: int | None = None,
-    ) -> dict[str, Any]:
+    ) -> CimaPaginatedResponse:
         return await core_buscar_vmpp(
             practiv1=practiv1,
             idpractiv1=idpractiv1,
@@ -276,7 +286,7 @@ def build_server(
         estuopsico: int | None = None,
         enuso: int | None = None,
         pagina: int = 1,
-    ) -> dict[str, Any]:
+    ) -> CimaPaginatedResponse:
         return await core_consultar_maestras(
             maestra=maestra,
             nombre=nombre,
@@ -298,7 +308,7 @@ def build_server(
         fecha: str | None = None,
         nregistro: list[str] | None = None,
         metodo: str = "GET",
-    ) -> dict[str, Any]:
+    ) -> CimaPaginatedResponse:
         return await core_registro_cambios(fecha=fecha, nregistro=nregistro, metodo=metodo)
 
     @_tool(description=problemas_suministro_description)
@@ -308,7 +318,7 @@ def build_server(
         nregistro: list[str] | None = None,
         pagina: int = 1,
         tamanioPagina: int = 25,
-    ) -> dict[str, Any]:
+    ) -> CimaCollectionResponse:
         return await core_problemas_suministro(
             cn=cn,
             nregistro=nregistro,
@@ -318,32 +328,32 @@ def build_server(
 
     @_tool(description=problemas_suministro_dcp_description)
     @_wrap
-    async def problemas_suministro_dcp(cod_dcp: str) -> dict[str, Any]:
+    async def problemas_suministro_dcp(cod_dcp: str) -> CimaResponse:
         return await core_problemas_suministro_dcp(cod_dcp=cod_dcp)
 
     @_tool(description=problemas_suministro_dcpf_description)
     @_wrap
-    async def problemas_suministro_dcpf(cod_dcpf: str) -> dict[str, Any]:
+    async def problemas_suministro_dcpf(cod_dcpf: str) -> CimaResponse:
         return await core_problemas_suministro_dcpf(cod_dcpf=cod_dcpf)
 
     @_tool(description=listar_notas_description)
     @_wrap
-    async def listar_notas(nregistro: list[str]) -> dict[str, Any]:
+    async def listar_notas(nregistro: list[str]) -> CimaCollectionResponse:
         return await core_listar_notas(nregistro=nregistro)
 
     @_tool(description=obtener_notas_description)
     @_wrap
-    async def obtener_notas(nregistros: list[str]) -> dict[str, Any]:
+    async def obtener_notas(nregistros: list[str]) -> CimaCollectionResponse:
         return await core_obtener_notas(nregistros=nregistros)
 
     @_tool(description=listar_materiales_description)
     @_wrap
-    async def listar_materiales(nregistro: list[str]) -> dict[str, Any]:
+    async def listar_materiales(nregistro: list[str]) -> CimaCollectionResponse:
         return await core_listar_materiales(nregistro=nregistro)
 
     @_tool(description=obtener_materiales_description)
     @_wrap
-    async def obtener_materiales(nregistro: str) -> dict[str, Any]:
+    async def obtener_materiales(nregistro: str) -> CimaResponse:
         return await core_obtener_materiales(nregistro=nregistro)
 
     # ------------------------------------------------------------------
@@ -355,7 +365,7 @@ def build_server(
         tipo_doc: int,
         nregistro: list[str] | None = None,
         cn: list[str] | None = None,
-    ) -> dict[str, Any]:
+    ) -> CimaResponse:
         return await core_doc_secciones(tipo_doc=tipo_doc, nregistro=nregistro, cn=cn)
 
     @_tool(description=doc_contenido_description)
@@ -388,7 +398,7 @@ def build_server(
     @_wrap
     async def html_ficha_tecnica_multiple(
         nregistro: list[str], filename: str = "FichaTecnica.html"
-    ) -> dict[str, Any]:
+    ) -> CimaCollectionResponse:
         return await core_html_ficha_tecnica_multiple(nregistro=nregistro, filename=filename)
 
     @_tool(description=html_p_description)
@@ -400,7 +410,7 @@ def build_server(
     @_wrap
     async def html_prospecto_multiple(
         nregistro: list[str], filename: str = "Prospecto.html"
-    ) -> dict[str, Any]:
+    ) -> CimaCollectionResponse:
         return await core_html_prospecto_multiple(nregistro=nregistro, filename=filename)
 
     # ------------------------------------------------------------------

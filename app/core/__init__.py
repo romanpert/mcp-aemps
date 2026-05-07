@@ -10,6 +10,13 @@ both transports. No more drift, no more duplicated business logic.
 """
 
 from app.core.base import OperationError, safe_call
+from app.core.schemas import (
+    CimaCollectionResponse,
+    CimaMetadataBlock,
+    CimaPaginatedResponse,
+    CimaResponse,
+    DocContenidoResponse,
+)
 from app.core.documentos import (
     core_doc_contenido,
     core_doc_secciones,
@@ -41,6 +48,12 @@ from app.core.vigilancia import (
 __all__ = [
     "OperationError",
     "safe_call",
+    # response schemas (v0.3.0 batch 3)
+    "CimaResponse",
+    "CimaPaginatedResponse",
+    "CimaCollectionResponse",
+    "CimaMetadataBlock",
+    "DocContenidoResponse",
     # medicamentos
     "core_obtener_medicamento",
     "core_buscar_medicamentos",

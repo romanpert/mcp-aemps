@@ -65,6 +65,33 @@ def test_every_tool_input_schema_is_json_schema() -> None:
         assert "properties" in schema, f"{t.name}: schema has no properties"
 
 
+def test_most_tools_expose_a_typed_output_schema() -> None:
+    """Spec server/tools §"Output Schema" — code-mode hosts (Claude Code,
+    Codex CLI) generate typed client APIs from outputSchema. Every CIMA
+    tool MUST expose one except ``doc_contenido`` whose return shape
+    (dict | str depending on ``format``) is intentionally a Union and
+    can't be usefully constrained."""
+    from app.stdio_server import build_server
+
+    tools = asyncio.run(build_server().list_tools())
+    no_schema = [t.name for t in tools if not t.outputSchema]
+    assert no_schema == ["doc_contenido"], (
+        f"unexpected tools without outputSchema: {no_schema}"
+    )
+
+    expected_titles = {
+        "CimaResponse",
+        "CimaPaginatedResponse",
+        "CimaCollectionResponse",
+        # Plus FastMCP's auto-wrapper title for primitive returns.
+    }
+    typed = [t for t in tools if t.outputSchema and t.outputSchema.get("title") in expected_titles]
+    assert len(typed) >= 17, (
+        f"expected ≥17 tools with one of the typed envelopes; got "
+        f"{len(typed)} (titles: { {t.outputSchema.get('title') for t in tools} })"
+    )
+
+
 def test_every_tool_has_a_localised_title() -> None:
     """Spec tools §205: ``title`` is the human-friendly display name shown
     in client pickers (Claude Desktop, Inspector, Continue). Every CIMA

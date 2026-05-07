@@ -45,6 +45,8 @@ from app.core import (
     core_html_ficha_tecnica_multiple,
     core_html_prospecto,
     core_html_prospecto_multiple,
+    core_obtener_medicamento,
+    core_obtener_presentacion,
 )
 
 # Maestra IDs as documented in CIMA REST API v1.23 §"GET maestras".
@@ -189,6 +191,28 @@ async def _prospecto_seccion(nregistro: str, seccion: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Templates — single medicamento / presentacion lookup (v0.3.0 batch 3 item 7)
+#
+# Same payload as the matching tool (``obtener_medicamento`` /
+# ``obtener_presentacion``) but exposed under the ``cima://`` URI scheme
+# so clients can: (a) cache per-CN/per-nregistro without re-paying the
+# tool-call token cost, (b) lazy-resolve hits returned by search tools
+# (``buscar_medicamentos`` etc.) without inlining each full record into
+# the conversation context.
+# ---------------------------------------------------------------------------
+
+
+async def _medicamento_lookup(nregistro: str) -> str:
+    payload = await core_obtener_medicamento(nregistro=nregistro)
+    return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+
+
+async def _presentacion_lookup(cn: str) -> str:
+    payload = await core_obtener_presentacion(cn=[cn])
+    return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+
+
+# ---------------------------------------------------------------------------
 # Public API — register every resource onto a FastMCP server
 # ---------------------------------------------------------------------------
 
@@ -328,6 +352,34 @@ def register_resources(server: FastMCP) -> None:
     async def prospecto_seccion(nregistro: str, seccion: str) -> str:
         return await _prospecto_seccion(nregistro, seccion)
 
+    # ---- Templates — medicamento / presentación por identificador ----
+    @server.resource(
+        "cima://medicamento/{nregistro}",
+        name="Medicamento por nregistro",
+        description=(
+            "Ficha completa de un medicamento por número de registro AEMPS. "
+            "Mismo payload que `obtener_medicamento(nregistro=...)`, expuesto "
+            "como recurso para que los clientes lo cacheen y lo resuelvan "
+            "perezosamente desde resultados de búsqueda."
+        ),
+        mime_type="application/json",
+    )
+    async def medicamento_por_nregistro(nregistro: str) -> str:
+        return await _medicamento_lookup(nregistro)
+
+    @server.resource(
+        "cima://presentacion/{cn}",
+        name="Presentación por CN",
+        description=(
+            "Detalle de una presentación por Código Nacional. Mismo payload "
+            "que `obtener_presentacion(cn=[<CN>])`, expuesto como recurso "
+            "para resolución perezosa y cacheo per-CN."
+        ),
+        mime_type="application/json",
+    )
+    async def presentacion_por_cn(cn: str) -> str:
+        return await _presentacion_lookup(cn)
+
 
 # ---------------------------------------------------------------------------
 # Catalogue introspection (used by tests + README docs generator)
@@ -348,4 +400,6 @@ RESOURCE_TEMPLATES = (
     "cima://docs/ficha-tecnica/{nregistro}/{seccion}",
     "cima://docs/prospecto/{nregistro}",
     "cima://docs/prospecto/{nregistro}/{seccion}",
+    "cima://medicamento/{nregistro}",
+    "cima://presentacion/{cn}",
 )

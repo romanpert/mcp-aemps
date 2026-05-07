@@ -116,6 +116,8 @@ def test_templates_carry_the_expected_parameters() -> None:
         "cima://docs/ficha-tecnica/{nregistro}/{seccion}": {"nregistro", "seccion"},
         "cima://docs/prospecto/{nregistro}": {"nregistro"},
         "cima://docs/prospecto/{nregistro}/{seccion}": {"nregistro", "seccion"},
+        "cima://medicamento/{nregistro}": {"nregistro"},
+        "cima://presentacion/{cn}": {"cn"},
     }
     import re
 
