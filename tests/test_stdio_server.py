@@ -88,14 +88,10 @@ def test_every_tool_exposes_an_output_schema() -> None:
         "CimaPaginatedResponse",
         "CimaCollectionResponse",
     }
-    typed = [
-        t for t in tools
-        if t.outputSchema and t.outputSchema.get("title") in typed_envelope_titles
-    ]
+    typed = [t for t in tools if t.outputSchema and t.outputSchema.get("title") in typed_envelope_titles]
     titles_seen = {(t.outputSchema or {}).get("title") for t in tools}
     assert len(typed) >= 13, (
-        f"expected ≥13 tools with a typed envelope; got "
-        f"{len(typed)} (titles seen: {titles_seen})"
+        f"expected ≥13 tools with a typed envelope; got {len(typed)} (titles seen: {titles_seen})"
     )
 
 
@@ -194,9 +190,7 @@ def test_progress_gather_emits_per_item_notifications() -> None:
     async def go():
         ctx = AsyncMock()
         ctx.report_progress = AsyncMock()
-        results = await progress_gather(
-            [mk(1), mk(2), mk(3)], ctx=ctx, label="items"
-        )
+        results = await progress_gather([mk(1), mk(2), mk(3)], ctx=ctx, label="items")
         return results, ctx
 
     results, ctx = asyncio.run(go())
@@ -274,28 +268,14 @@ def test_completions_route_prompt_args_and_template_params() -> None:
             "app.completions.core_buscar_medicamentos",
             AsyncMock(return_value=mock_payload),
         ):
-            tpl_ref = ResourceTemplateReference(
-                type="ref/resource", uri="cima://medicamento/{nregistro}"
-            )
-            tpl_values = await _suggest(
-                tpl_ref, CompletionArgument(name="nregistro", value="123")
-            )
-            prompt_ref = PromptReference(
-                type="ref/prompt", name="equivalencias_genericas"
-            )
-            prompt_values = await _suggest(
-                prompt_ref, CompletionArgument(name="nregistro", value="12")
-            )
-            short = await _suggest(
-                prompt_ref, CompletionArgument(name="nregistro", value="1")
-            )
-            unknown_arg = await _suggest(
-                prompt_ref, CompletionArgument(name="unknown_arg", value="abc")
-            )
+            tpl_ref = ResourceTemplateReference(type="ref/resource", uri="cima://medicamento/{nregistro}")
+            tpl_values = await _suggest(tpl_ref, CompletionArgument(name="nregistro", value="123"))
+            prompt_ref = PromptReference(type="ref/prompt", name="equivalencias_genericas")
+            prompt_values = await _suggest(prompt_ref, CompletionArgument(name="nregistro", value="12"))
+            short = await _suggest(prompt_ref, CompletionArgument(name="nregistro", value="1"))
+            unknown_arg = await _suggest(prompt_ref, CompletionArgument(name="unknown_arg", value="abc"))
             unknown_template = await _suggest(
-                ResourceTemplateReference(
-                    type="ref/resource", uri="cima://nonexistent/{x}"
-                ),
+                ResourceTemplateReference(type="ref/resource", uri="cima://nonexistent/{x}"),
                 CompletionArgument(name="x", value="abc"),
             )
             return tpl_values, prompt_values, short, unknown_arg, unknown_template

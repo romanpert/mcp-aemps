@@ -18,6 +18,7 @@ from dateutil import parser
 from httpx import HTTPStatusError
 
 from app.config import settings
+from app.etag_store import get_active_store as _etag_store
 
 logger = logging.getLogger(__name__)
 
@@ -43,14 +44,14 @@ TIPOS_PROBLEMA = {
 
 _DEFAULT_HEADERS = {"Accept": "application/json", "User-Agent": "mcp-aemps/1.0"}
 
-# In-process ETag store: {request_key: (etag, parsed_response)}.
-# Honours CIMA's 30-min CDN cache: when we have a stored ETag we send
-# If-None-Match; if CIMA returns 304 we return the cached parsed response
-# without re-deserialising. This typically reduces upstream load by an order
-# of magnitude on hot paths (medicamento, presentaciones).
-_ETAG_CACHE_MAX = 2048
-_etag_cache: dict[str, tuple[str, Any]] = {}
-
+# ETag store — pluggable. Default: in-memory LRU (process-local). When
+# REDIS_URL is configured the lifespan hook in app.lifespan swaps in a
+# RedisETagStore so multi-replica deployments share the revalidation
+# map. See app/etag_store.py for the contract; Premium / enterprise
+# forks plug their own backend via ``set_active_store``. The import
+# itself lives at the top of this module (PEP 8 / E402); ``_etag_store``
+# is a callable returning the currently-active store, so swapping it at
+# runtime takes effect on the next request without a re-import.
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -113,9 +114,11 @@ async def _request(
             cache_key = f"{path}?{json.dumps(clean_params or {}, sort_keys=True)}"
 
         headers = dict(_DEFAULT_HEADERS)
-        if cache_key and cache_key in _etag_cache:
-            stored_etag, _ = _etag_cache[cache_key]
-            headers["If-None-Match"] = stored_etag
+        cached_entry: tuple[str, Any] | None = None
+        if cache_key:
+            cached_entry = await _etag_store().get(cache_key)
+            if cached_entry is not None:
+                headers["If-None-Match"] = cached_entry[0]
 
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
@@ -128,11 +131,10 @@ async def _request(
             )
 
         # 304 Not Modified — return cached parsed response without re-parsing.
-        if resp.status_code == 304 and cache_key and cache_key in _etag_cache:
-            _, cached_payload = _etag_cache[cache_key]
+        if resp.status_code == 304 and cached_entry is not None:
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug("HTTP %s %s | 304 (cached, etag hit)", method, path)
-            return cached_payload
+            return cached_entry[1]
 
         if logger.isEnabledFor(logging.DEBUG):
             clen = resp.headers.get("Content-Length") or (
@@ -153,9 +155,7 @@ async def _request(
         # Cache the (etag, payload) pair when CIMA provided one.
         etag = resp.headers.get("ETag")
         if cache_key and etag:
-            if len(_etag_cache) >= _ETAG_CACHE_MAX:
-                _etag_cache.pop(next(iter(_etag_cache)), None)
-            _etag_cache[cache_key] = (etag, payload)
+            await _etag_store().set(cache_key, etag, payload)
 
         return payload
 
@@ -581,9 +581,44 @@ async def get_html_bytes(
     nregistro: str,
     filename: str,
 ) -> bytes:
-    """Descarga completa en bytes desde cima.aemps.es/cima/dochtml/..."""
+    """Descarga completa en bytes desde cima.aemps.es/cima/dochtml/...
+
+    Buffered. Use this when the caller needs the full body (MCP tool
+    responses where the LLM consumes the HTML as a single TextContent,
+    or batch fan-out tools that aggregate per-nregistro). Use
+    ``stream_html_bytes`` instead for HTTP routes that can pipe the
+    body straight to the client without buffering megabytes."""
     url = f"{HTML_BASE_URL}/dochtml/{tipo}/{nregistro}/{filename}"
     async with httpx.AsyncClient(timeout=TIMEOUT, headers=_DEFAULT_HEADERS) as client:
         resp = await client.get(url, follow_redirects=True)
         resp.raise_for_status()
         return resp.content
+
+
+async def stream_html_bytes(
+    tipo: Literal["ft", "p"],
+    nregistro: str,
+    filename: str,
+    *,
+    chunk_size: int = 64 * 1024,
+):
+    """Async iterator yielding chunks of an AEMPS dochtml document.
+
+    Use in FastAPI HTTP routes via ``StreamingResponse`` when the
+    caller is a real HTTP client (browser, ``curl``, downstream proxy)
+    that can consume the body progressively. Avoids buffering the full
+    document in process memory — leaflets routinely hit a few hundred
+    KB and SmPCs can exceed 1 MB once images/SVGs are inlined.
+
+    Raises ``httpx.HTTPStatusError`` *before* yielding the first chunk
+    if the upstream status is not 2xx, so the route's exception
+    handler can translate it to a 4xx/5xx response cleanly. Once
+    streaming has started the headers are committed and an
+    error mid-stream surfaces as a partial response — there is no way
+    to upgrade that to an HTTP error per the wire protocol."""
+    url = f"{HTML_BASE_URL}/dochtml/{tipo}/{nregistro}/{filename}"
+    async with httpx.AsyncClient(timeout=TIMEOUT, headers=_DEFAULT_HEADERS) as client:
+        async with client.stream("GET", url, follow_redirects=True) as resp:
+            resp.raise_for_status()
+            async for chunk in resp.aiter_bytes(chunk_size):
+                yield chunk

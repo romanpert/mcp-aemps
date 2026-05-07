@@ -5,16 +5,16 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi import Path as FPath
-from fastapi.responses import HTMLResponse
+from fastapi.responses import StreamingResponse
+from httpx import HTTPStatusError
 
+from app.cima_client import stream_html_bytes
 from app.core import (
     core_doc_contenido,
     core_doc_secciones,
-    core_html_ficha_tecnica,
     core_html_ficha_tecnica_multiple,
-    core_html_prospecto,
     core_html_prospecto_multiple,
 )
 from app.mcp_constants import (
@@ -110,6 +110,33 @@ async def html_prospecto_multiple(
     return await core_html_prospecto_multiple(nregistro=nregistro, filename=filename)
 
 
+async def _stream_dochtml(tipo: str, nregistro: str, filename: str, label: str) -> StreamingResponse:
+    """Wrap ``cima_client.stream_html_bytes`` so HTTP errors raised
+    before the first chunk arrive as proper 4xx/5xx (404 if upstream
+    is missing the document). Once the iterator yields any byte the
+    response status is committed; partial reads are surfaced as
+    truncated bodies, not retroactive error codes."""
+    iterator = stream_html_bytes(tipo, nregistro, filename)
+    try:
+        first_chunk = await iterator.__anext__()
+    except StopAsyncIteration:
+        raise HTTPException(status_code=404, detail=f"{label} no encontrado") from None
+    except HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise HTTPException(status_code=404, detail=f"{label} no encontrado") from exc
+        raise HTTPException(
+            status_code=502,
+            detail=f"Error al obtener {label.lower()} (HTTP {exc.response.status_code})",
+        ) from exc
+
+    async def body():
+        yield first_chunk
+        async for chunk in iterator:
+            yield chunk
+
+    return StreamingResponse(body(), media_type="text/html; charset=utf-8")
+
+
 @router.get(
     "/doc-html/ft/{nregistro}/{filename:path}",
     operation_id="html_ficha_tecnica",
@@ -122,8 +149,11 @@ async def html_ficha_tecnica(
     nregistro: str = FPath(..., description="Numero de registro"),
     filename: str = FPath(..., description="Ruta y nombre de archivo HTML"),
 ):
-    html = await core_html_ficha_tecnica(nregistro=nregistro, filename=filename)
-    return HTMLResponse(content=html)
+    # Streamed straight from CIMA — avoids buffering multi-MB SmPC
+    # bodies in process memory. The MCP tool path
+    # (``core_html_ficha_tecnica``) still uses the buffered variant
+    # because TextContent needs the whole string at once.
+    return await _stream_dochtml("ft", nregistro, filename, "Ficha tecnica")
 
 
 @router.get(
@@ -138,5 +168,4 @@ async def html_prospecto(
     nregistro: str = FPath(..., description="Numero de registro"),
     filename: str = FPath(..., description="Ruta y nombre de archivo HTML"),
 ):
-    html = await core_html_prospecto(nregistro=nregistro, filename=filename)
-    return HTMLResponse(content=html)
+    return await _stream_dochtml("p", nregistro, filename, "Prospecto")

@@ -25,6 +25,13 @@ from app.cache import (
     periodic_maestras_refresh,
     warm_maestras,
 )
+from app.etag_store import (
+    InMemoryETagStore,
+    RedisETagStore,
+)
+from app.etag_store import (
+    set_active_store as _set_etag_store,
+)
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -53,6 +60,20 @@ def build_lifespan(
         logger.info("Starting application lifespan")
 
         await init_cache_backend(app)
+
+        # Wire the ETag store: Redis-backed when init_cache_backend
+        # confirmed Redis is reachable (multi-replica deployments share
+        # the revalidation map and the 304 win scales with replicas);
+        # in-memory otherwise. Stdio (no FastAPI lifespan) keeps the
+        # in-memory default that ``app.etag_store`` initialises at
+        # import time.
+        redis_client = getattr(app.state, "redis", None)
+        if redis_client is not None:
+            _set_etag_store(RedisETagStore(redis_client))
+            logger.info("ETag store: Redis (shared across replicas)")
+        else:
+            _set_etag_store(InMemoryETagStore())
+            logger.info("ETag store: in-memory (process-local)")
 
         for hook in startup_hooks:
             try:

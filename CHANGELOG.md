@@ -5,6 +5,66 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.6] — 2026-05-07
+
+Two efficiency / scalability improvements that fall inside the
+post-2026-05-07 hard scope rule (no new endpoints; quality work only
+until v1.0.0).
+
+### Added
+
+- **Streaming HTML / leaflet downloads on the HTTP transport.**
+  `app.cima_client.stream_html_bytes()` async iterator + FastAPI
+  `StreamingResponse` on `/doc-html/ft/{nregistro}/{filename}` and
+  `/doc-html/p/{nregistro}/{filename}`. Pipes the body straight from
+  CIMA to the client without buffering — leaflets routinely hit
+  hundreds of KB and SmPCs can exceed 1 MB once images / SVGs are
+  inlined. The MCP tool path
+  (`core_html_ficha_tecnica` / `core_html_prospecto`) keeps the
+  buffered fetch because TextContent must be a single string.
+  Errors raised before the first chunk surface as proper 4xx (404 if
+  upstream is missing the doc) / 502 (other upstream failures);
+  errors mid-stream become truncated bodies (HTTP wire-protocol
+  limitation, not fixable).
+- **Pluggable ETag store** (`app/etag_store.py`). New `ETagStore`
+  Protocol + two implementations:
+  - `InMemoryETagStore` — process-local LRU (`OrderedDict`-backed,
+    O(1) eviction, MRU-touch on `get`). Default. Adequate for
+    single-instance deployments.
+  - `RedisETagStore` — Redis / Valkey-backed, active automatically
+    when `REDIS_URL` resolves (same opt-in as the existing cache /
+    rate-limit Redis surface — no new env var). Multi-replica
+    deployments share the revalidation map, so a `304 Not Modified`
+    against one replica's cache benefits every other replica.
+  Wired into `app.lifespan`: when `app.state.redis` is non-None after
+  cache init, the active store is swapped via
+  `etag_store.set_active_store(RedisETagStore(redis))`. Stdio (no
+  FastAPI lifespan) keeps the in-memory default. The abstraction is
+  the seam Premium / enterprise forks can target for non-Redis
+  backends (Memcached, Workers KV, …) without touching
+  `cima_client.py`.
+
+### Changed
+
+- `cima_client._request` now reads / writes the ETag cache through
+  the `ETagStore` interface instead of a module-global dict. Behaviour
+  is identical when the in-memory backend is active; the Redis
+  backend extends sharing across replicas with a 1-hour TTL on stored
+  entries (CIMA's `Cache-Control: max-age=1800` plus safety margin).
+
+### Documented
+
+- **Hard scope rule** locked in `CLAUDE.md` (gitignored): Community
+  Edition mirrors CIMA REST API endpoints only; improvements between
+  v0.4.x and v1.0.0 are quality work (efficiency, security,
+  scalability, modularity for Premium forks). No new tools without a
+  backing CIMA endpoint. `descargar-imagenes` and IPT/IPE PDF
+  extraction stay Premium-only; multi-NCA aggregation belongs in
+  separate `mcp-ema` / `mcp-aifa` packages, not here.
+- **v0.9.0 unlock** noted in ROADMAP: at the v0.9.0 boundary, drop
+  the MINOR-only filter on `docker-mcp-registry.yml` so the auto-PR
+  fires on every patch like the rest of the pipeline.
+
 ## [0.4.5] — 2026-05-07
 
 ### Fixed
