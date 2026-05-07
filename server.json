@@ -8,6 +8,23 @@
     "url": "https://github.com/romanpert/mcp-aemps",
     "source": "github"
   },
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/romanpert/mcp-aemps/master/docs/icons/icon-64.png",
+      "mimeType": "image/png",
+      "sizes": ["64x64"]
+    },
+    {
+      "src": "https://raw.githubusercontent.com/romanpert/mcp-aemps/master/docs/icons/icon-128.png",
+      "mimeType": "image/png",
+      "sizes": ["128x128"]
+    },
+    {
+      "src": "https://raw.githubusercontent.com/romanpert/mcp-aemps/master/docs/icons/icon-256.png",
+      "mimeType": "image/png",
+      "sizes": ["256x256"]
+    }
+  ],
   "version": "0.2.11",
   "packages": [
     {

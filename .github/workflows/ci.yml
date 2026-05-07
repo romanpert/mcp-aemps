@@ -72,6 +72,30 @@ jobs:
           name: dist
           path: dist/
 
+  inspector:
+    name: MCP Inspector compliance
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install package
+        run: |
+          pip install --upgrade pip
+          pip install -e .
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Run inspector compliance smoke
+        run: bash tests/inspector_compliance.sh
+        env:
+          PORT: "18765"
+
   validate-server-json:
     name: Validate server.json
     runs-on: ubuntu-latest
