@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "mcp-aemps": {
+      "command": "uvx",
+      "args": ["mcp-aemps", "stdio"]
+    }
+  }
+}

@@ -5,6 +5,102 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-05-07
+
+Anthropic MCP best-practices 2026-Q2 alignment. Skipped `0.3.0` to mark
+the breadth of changes — every additive feature flagged by the audit
+landed except resource subscriptions, which is held back as a candidate
+for the premium / enterprise tier.
+
+### Added
+
+- **Tool titles** (spec tools §205). Every tool now exposes a localised
+  display name (`TOOL_TITLES` per locale). Claude Desktop, Inspector,
+  Continue and JetBrains Junie render the title in their pickers
+  instead of the bare `name`.
+- **`logging/setLevel` capability** (spec server/utilities/logging).
+  Clients can adjust verbosity at runtime; RFC 5424 levels
+  (debug…emergency) are mapped onto the stdlib logger tree via
+  `apply_mcp_log_level`. Capability is auto-advertised once the
+  handler is registered.
+- **`outputSchema` + `structuredContent`** (spec server/tools §"Output
+  Schema") on 21/21 tools. New `app/core/schemas.py` declares three
+  Pydantic envelopes (`CimaResponse`, `CimaPaginatedResponse`,
+  `CimaCollectionResponse`) — typed enough for code-mode hosts
+  (Claude Code, Codex CLI) to navigate `metadata` / `resultados` /
+  `errors` without re-extracting from a generic dict, permissive
+  enough (`extra='allow'`) that upstream CIMA payloads ride through.
+  `doc_contenido` was the last holdout; it is now normalised to
+  `list[ContentBlock]` so FastMCP auto-wraps a schema while preserving
+  the LLM-visible raw HTML/text contract on `format=html|txt`.
+- **`resource_link` content blocks** (spec tools §370) emitted by 5
+  search/collection tools (`buscar_medicamentos`,
+  `listar_presentaciones`, `listar_notas`, `listar_materiales`,
+  `problemas_suministro`). Code-mode hosts lazy-resolve hits via
+  `cima://medicamento/{nregistro}` / `cima://presentacion/{cn}`
+  instead of inlining every full record. TextContent JSON ordering
+  preserved so non-code-mode hosts see no wire-format change.
+- **Resource templates** `cima://medicamento/{nregistro}` and
+  `cima://presentacion/{cn}` — same payload as
+  `obtener_medicamento` / `obtener_presentacion`, exposed under the
+  `cima://` URI scheme so clients can cache per-id.
+- **`completion/complete` handler** (spec server/utilities/completion)
+  in `app/completions.py`. Autocomplete for `nregistro`, `cn`,
+  `laboratorio`, `principio_activo`, `atc` on prompt arguments and on
+  the 7 resource templates. Soft-fail — autocomplete never blocks a
+  tool call. `MIN_PREFIX_LEN=2` bounds upstream load.
+- **`notifications/progress`** (spec server/utilities/progress) on 4
+  fanout tools (`listar_notas`, `listar_materiales`,
+  `html_ficha_tecnica_multiple`, `html_prospecto_multiple`). New
+  `app.helpers.progress_gather` is a drop-in for `bounded_gather`
+  that emits per-item progress when `ctx` carries a `progressToken`,
+  degrades cleanly to plain `bounded_gather` when `ctx=None` (HTTP
+  transport, tests).
+- **MCP Inspector compliance CI job**
+  (`.github/workflows/ci.yml::inspector`). Boots uvicorn, runs
+  `npx @modelcontextprotocol/inspector --cli` against `tools/list`,
+  `prompts/list`, `resources/list`. Asserts ≥ 21 tools with
+  non-empty title, description and read-only annotation; ≥ 10 prompts;
+  ≥ 1 resource. Catches regressions unit tests miss
+  (content-types, missing `_meta`, capability drift).
+- **Icons metadata (SEP-973)** in `server.json`. Three sized PNGs
+  (64/128/256) under `docs/icons/` referenced via raw GitHub URLs.
+  Validates against the 2025-12-11 server schema. FastMCP
+  `Implementation` injection deferred until the `mcp` library
+  forwards `icons` through `serverInfo`.
+- **MCPB bundle** (`mcpb/manifest.json`, `mcpb/server/main.py`,
+  `mcpb/pyproject.toml`, `scripts/build_mcpb.sh`). Single-click
+  install for Claude for Mac/Windows. Uses the official
+  `@anthropic-ai/mcpb` CLI with `type: uv` runtime — the bundle
+  pulls `mcp-aemps==<tag>` from PyPI on first launch, so the
+  artefact stays small. New `build-mcpb` job in `release.yml`
+  attaches the `.mcpb` to every GitHub Release.
+- **Claude Code plugin** (`.claude-plugin/`). Three slash commands
+  (`/aemps-buscar`, `/aemps-vigilancia`, `/aemps-ficha`) compose
+  existing tools and prompts. Bundled `.mcp.json` auto-registers
+  `mcp-aemps` via `uvx mcp-aemps stdio` so installing the plugin
+  installs the server.
+
+### Changed
+
+- **Trimmed tool descriptions** (audit item 10). ES `13638 → 6474`
+  chars (-52.5%); EN `13057 → 6311` (-51.7%). Long examples and
+  exhaustive enum tables moved out of upfront-loaded descriptions;
+  parameter shape lives in the JSON `inputSchema` (already
+  auto-derived from function signatures).
+- **`stdio_server.py` no longer uses `from __future__ import annotations`.**
+  After `wrap_stdio_tool` applies `functools.wraps`, FastMCP's
+  annotation resolver looks names up in the wrapper's `__globals__`
+  (= `app.tool_hooks`, which doesn't import the response models).
+  Eager (non-stringified) annotations sidestep that lookup.
+
+### Out of scope (deferred / rejected)
+
+- **Resource subscriptions + `notifications/resources/updated`** —
+  candidate for the premium / enterprise tier. Real value (push
+  pharmacovigilance alerts) but introduces a long-running background
+  task; revisited in a separate release.
+
 ## [0.2.11] — 2026-05-06
 
 ### Added

@@ -1,0 +1,14 @@
+# MCPB bundle pyproject — declares the runtime dependency on the
+# published mcp-aemps package. The MCPB host's `uv` reads this to
+# install the package on first launch and cache the venv afterwards.
+#
+# The `version` and the dependency pin are synced with the parent
+# project's pyproject at bundle build time (see scripts/build_mcpb.sh).
+# Don't edit by hand.
+[project]
+name = "mcp-aemps-mcpb"
+version = "0.0.0"
+description = "MCPB bundle wrapper for mcp-aemps"
+readme = "../README.md"
+requires-python = ">=3.11"
+dependencies = ["mcp-aemps==0.0.0"]

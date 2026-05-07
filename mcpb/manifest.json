@@ -1,0 +1,77 @@
+{
+  "manifest_version": "0.4",
+  "name": "mcp-aemps",
+  "display_name": "MCP AEMPS — CIMA",
+  "version": "0.0.0",
+  "description": "First open-source, regulatory-compliant MCP server for the Spanish AEMPS CIMA pharmaceutical registry (20,000+ authorised medicines).",
+  "long_description": "Exposes the Spanish AEMPS CIMA REST API as MCP tools, prompts and resources: 21 tools (medicamentos, presentaciones, VMP/VMPP, maestras, registro de cambios, problemas de suministro, notas de seguridad, materiales informativos, fichas técnicas, prospectos), 10 curated prompts for hospital / industria / public, and `cima://` resource templates with autocomplete for nregistro / CN / ATC / principios activos / laboratorios.",
+  "author": {
+    "name": "Roman Perez Dumpert",
+    "url": "https://github.com/romanpert"
+  },
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/romanpert/mcp-aemps",
+  "documentation": "https://github.com/romanpert/mcp-aemps#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/romanpert/mcp-aemps"
+  },
+  "keywords": [
+    "mcp",
+    "aemps",
+    "cima",
+    "pharmaceutical",
+    "regulatory",
+    "healthcare",
+    "spain",
+    "drug-registry"
+  ],
+  "icons": [
+    {
+      "src": "icons/icon-64.png",
+      "size": "64x64"
+    },
+    {
+      "src": "icons/icon-128.png",
+      "size": "128x128"
+    },
+    {
+      "src": "icons/icon-256.png",
+      "size": "256x256"
+    }
+  ],
+  "server": {
+    "type": "uv",
+    "entry_point": "server/main.py"
+  },
+  "tools_generated": true,
+  "prompts_generated": true,
+  "compatibility": {
+    "platforms": ["darwin", "linux", "win32"],
+    "runtimes": {
+      "python": ">=3.11"
+    }
+  },
+  "user_config": {
+    "log_level": {
+      "type": "string",
+      "title": "Log level",
+      "description": "Verbosity of the embedded server logs (DEBUG / INFO / WARNING / ERROR).",
+      "default": "INFO",
+      "required": false
+    },
+    "redis_url": {
+      "type": "string",
+      "title": "Redis URL (optional)",
+      "description": "If set, mcp-aemps uses Redis for distributed cache + rate limiting. Leave blank for the in-memory default.",
+      "required": false,
+      "sensitive": true
+    },
+    "mcp_aemps_locale": {
+      "type": "string",
+      "title": "Locale",
+      "description": "Tool descriptions and prompts language: 'es' (default) or 'en'. Auto-detected from OS if unset.",
+      "required": false
+    }
+  }
+}

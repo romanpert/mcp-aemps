@@ -88,9 +88,37 @@ jobs:
       - name: Publish
         run: ./mcp-publisher publish
 
+  build-mcpb:
+    name: Build MCPB bundle
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Wait for PyPI indexing
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          for i in $(seq 1 30); do
+            v=$(curl -s "https://pypi.org/pypi/mcp-aemps/json" | python3 -c "import sys,json;print(json.load(sys.stdin).get('info',{}).get('version',''))")
+            if [ "$v" = "$tag" ]; then echo "PyPI indexed $v"; exit 0; fi
+            sleep 10
+          done
+          echo "Timed out waiting for PyPI" >&2; exit 1
+      - name: Build .mcpb
+        run: bash scripts/build_mcpb.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcpb
+          path: dist/*.mcpb
+
   github-release:
     name: Create GitHub Release
-    needs: publish-pypi
+    needs: [publish-pypi, build-mcpb]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -99,6 +127,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: dist
+          path: dist/
+      - uses: actions/download-artifact@v4
+        with:
+          name: mcpb
           path: dist/
       - name: Extract changelog section
         id: notes
