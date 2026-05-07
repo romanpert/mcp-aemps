@@ -17,12 +17,16 @@ def test_tier_limits_match_documented_values() -> None:
         LIMIT_STANDARD,
     )
 
-    assert LIMIT_LOCAL.amount == 120
-    assert LIMIT_STANDARD.amount == 30
-    assert LIMIT_DOCUMENT.amount == 10
-    assert LIMIT_HEAVY.amount == 6
-    assert CIMA_FANOUT_LIMIT == 8
-    assert BATCH_FANOUT_LIMIT == 4
+    # v0.4.8 — limits bumped 2.5-3.3x to fit agent burst patterns
+    # (10-30 tool calls in a few seconds during one model turn) without
+    # blocking solo users. Upstream courtesy still enforced via the
+    # CIMA_FANOUT_SEMAPHORE (16 concurrent ceiling).
+    assert LIMIT_LOCAL.amount == 300
+    assert LIMIT_STANDARD.amount == 120
+    assert LIMIT_DOCUMENT.amount == 30
+    assert LIMIT_HEAVY.amount == 20
+    assert CIMA_FANOUT_LIMIT == 16
+    assert BATCH_FANOUT_LIMIT == 8
 
 
 def test_global_semaphore_caps_concurrent_acquisitions() -> None:
@@ -41,7 +45,9 @@ def test_global_semaphore_caps_concurrent_acquisitions() -> None:
                 await asyncio.sleep(0.01)
                 active -= 1
 
-        await asyncio.gather(*(task() for _ in range(20)))
+        # Launch 2x the limit so we definitely saturate the semaphore
+        # — with N tasks <= limit, observed peak == N tells us nothing.
+        await asyncio.gather(*(task() for _ in range(CIMA_FANOUT_LIMIT * 2)))
         return peak
 
     peak = asyncio.run(runner())

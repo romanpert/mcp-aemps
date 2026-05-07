@@ -76,6 +76,81 @@ def _check_command_on_path(command: str) -> str | None:
     return f"WARNING: '{command}' not found on PATH — config written but the client will fail to launch the server until you install it.{suffix}"
 
 
+# Per-client install hints surfaced when the client itself doesn't
+# appear to be installed (no config directory + no launcher on PATH).
+# Keeping these centralised makes adding a new installer trivial:
+# define the entry below + call ``_check_client_installed`` from the
+# new installer.
+_CLIENT_INSTALL_HINTS: dict[str, str] = {
+    "Claude Desktop": "https://claude.ai/download",
+    "Claude Code": "https://docs.claude.com/en/docs/claude-code/quickstart",
+    "Codex CLI": "https://github.com/openai/codex",
+    "VS Code": "https://code.visualstudio.com/download",
+    "Cursor": "https://cursor.com/download",
+    "Windsurf": "https://codeium.com/windsurf",
+    "Zed": "https://zed.dev/download",
+    "Continue.dev": "https://www.continue.dev/",
+    "JetBrains Junie": "https://www.jetbrains.com/junie/",
+}
+
+
+def _collect_install_warnings(
+    client_name: str,
+    *,
+    config_dirs: tuple[Path, ...] = (),
+    path_binaries: tuple[str, ...] = (),
+    extra_commands: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    """One-call wrapper used at the top of every ``install_<client>``.
+
+    Returns the combined warnings tuple to feed straight into
+    ``InstallResult(warnings=...)``:
+    - Client-installed-or-not detection (NOTE).
+    - Command prerequisites on PATH (WARNING). Pass ``extra_commands``
+      with the launchers the chosen transport will spawn (e.g.
+      ``("uvx",)`` for stdio, ``("npx",)`` for the mcp-remote bridge)."""
+    out: list[str] = []
+    if w := _check_client_installed(client_name, config_dirs=config_dirs, path_binaries=path_binaries):
+        out.append(w)
+    for cmd in extra_commands:
+        if w := _check_command_on_path(cmd):
+            out.append(w)
+    return tuple(out)
+
+
+def _check_client_installed(
+    client_name: str,
+    *,
+    config_dirs: tuple[Path, ...] = (),
+    path_binaries: tuple[str, ...] = (),
+) -> str | None:
+    """Return a NOTE warning if the target client doesn't appear to be
+    installed, else ``None``.
+
+    Detection is deliberately permissive — false negatives (warning
+    when client is actually installed elsewhere) are far worse than
+    false positives. The check is True if **any** of:
+    - any directory in ``config_dirs`` exists (the client created its
+      profile, has been launched at least once);
+    - any binary in ``path_binaries`` resolves on PATH (CLI tools).
+
+    NEVER blocks the install — the user may be deliberately
+    pre-configuring the machine before installing the client."""
+    if any(d.exists() for d in config_dirs):
+        return None
+    if any(shutil.which(b) for b in path_binaries):
+        return None
+
+    hint = _CLIENT_INSTALL_HINTS.get(client_name, "")
+    suffix = f"  Install: {hint}" if hint else ""
+    paths = ", ".join(str(d) for d in config_dirs) or "<no path heuristic>"
+    return (
+        f"NOTE: {client_name} doesn't appear to be installed (no profile "
+        f"directory at: {paths}). Config has been written for when you "
+        f"install it.{suffix}"
+    )
+
+
 def _atomic_write_json(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -168,6 +243,9 @@ def install_claude_desktop(
 
     warnings: list[str] = []
 
+    if w := _check_client_installed("Claude Desktop", config_dirs=(path.parent,)):
+        warnings.append(w)
+
     if transport == "stdio":
         desired: dict[str, Any] = {"command": "uvx", "args": ["mcp-aemps@latest", "stdio"]}
         message_suffix = "(uvx auto-launch); restart Claude Desktop"
@@ -243,6 +321,15 @@ def install_claude_code(
 ) -> InstallResult:
     """Register mcp-aemps with Claude Code. CLI-preferred, JSON fallback."""
     url = url or _default_url()
+    # Detection: ``claude`` CLI on PATH OR the per-user profile dir at
+    # ~/.claude/ exists (created by ``claude`` on first run). The
+    # ~/.claude.json file lives at home root so its ``.parent`` is just
+    # the home dir — useless as a signal.
+    warnings = _collect_install_warnings(
+        "Claude Code",
+        config_dirs=(Path.home() / ".claude",),
+        path_binaries=("claude",),
+    )
     cli_allowed = config_path is None and (use_cli is None or use_cli)
     if cli_allowed and _claude_cli_available():
         try:
@@ -254,6 +341,7 @@ def install_claude_code(
                     Path("(via `claude mcp add`)"),
                     "added",
                     f"{server_key} -> {url} (scope={scope})",
+                    warnings=warnings,
                 )
             stderr = (result.stderr or "").lower()
             if "already exists" in stderr or "already configured" in stderr:
@@ -262,6 +350,7 @@ def install_claude_code(
                     Path("(via `claude mcp add`)"),
                     "unchanged",
                     f"{server_key} already configured",
+                    warnings=warnings,
                 )
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
@@ -273,12 +362,14 @@ def install_claude_code(
     existing = config["mcpServers"].get(server_key)
 
     if existing == desired:
-        return InstallResult("Claude Code", path, "unchanged", f"{server_key} already configured")
+        return InstallResult(
+            "Claude Code", path, "unchanged", f"{server_key} already configured", warnings=warnings
+        )
 
     action = "updated" if existing else "added"
     config["mcpServers"][server_key] = desired
     _atomic_write_json(path, config)
-    return InstallResult("Claude Code", path, action, f"{server_key} -> {url}")
+    return InstallResult("Claude Code", path, action, f"{server_key} -> {url}", warnings=warnings)
 
 
 def uninstall_claude_code(
@@ -329,6 +420,11 @@ def install_codex(
     """Append a [mcp_servers.<name>] block to ~/.codex/config.toml (idempotent)."""
     url = url or _default_url()
     path = config_path or codex_config_path()
+    warnings = _collect_install_warnings(
+        "Codex CLI",
+        config_dirs=(path.parent,),
+        path_binaries=("codex",),
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     existing_text = path.read_text(encoding="utf-8") if path.exists() else ""
 
@@ -356,14 +452,16 @@ def install_codex(
         action = "added"
 
     if new_text == existing_text:
-        return InstallResult("Codex CLI", path, "unchanged", f"{server_key} already configured")
+        return InstallResult(
+            "Codex CLI", path, "unchanged", f"{server_key} already configured", warnings=warnings
+        )
 
     path.write_text(new_text, encoding="utf-8")
     try:
         os.chmod(path, 0o600)
     except OSError:
         pass
-    return InstallResult("Codex CLI", path, action, f"{server_key} -> {url}")
+    return InstallResult("Codex CLI", path, action, f"{server_key} -> {url}", warnings=warnings)
 
 
 def uninstall_codex(*, server_key: str = SERVER_KEY, config_path: Path | None = None) -> InstallResult:
@@ -425,18 +523,25 @@ def install_vscode(
     """
     url = url or _default_url()
     path = config_path or vscode_settings_path()
+    warnings = _collect_install_warnings(
+        "VS Code",
+        config_dirs=(path.parent,),
+        path_binaries=("code",),
+    )
     config = _read_json(path)
 
     desired = {"type": "http", "url": url}
     existing = _get_nested(config, ["mcp", "servers", server_key])
 
     if existing == desired:
-        return InstallResult("VS Code", path, "unchanged", f"{server_key} already configured")
+        return InstallResult(
+            "VS Code", path, "unchanged", f"{server_key} already configured", warnings=warnings
+        )
 
     action = "updated" if existing else "added"
     _set_nested(config, ["mcp", "servers", server_key], desired)
     _atomic_write_json(path, config)
-    return InstallResult("VS Code", path, action, f"{server_key} -> {url}")
+    return InstallResult("VS Code", path, action, f"{server_key} -> {url}", warnings=warnings)
 
 
 def uninstall_vscode(*, server_key: str = SERVER_KEY, config_path: Path | None = None) -> InstallResult:
@@ -468,6 +573,11 @@ def install_cursor(
     """
     url = url or _default_url()
     path = config_path or cursor_config_path()
+    warnings = _collect_install_warnings(
+        "Cursor",
+        config_dirs=(path.parent,),
+        path_binaries=("cursor",),
+    )
     config = _read_json(path)
     config.setdefault("mcpServers", {})
 
@@ -475,12 +585,14 @@ def install_cursor(
     existing = config["mcpServers"].get(server_key)
 
     if existing == desired:
-        return InstallResult("Cursor", path, "unchanged", f"{server_key} already configured")
+        return InstallResult(
+            "Cursor", path, "unchanged", f"{server_key} already configured", warnings=warnings
+        )
 
     action = "updated" if existing else "added"
     config["mcpServers"][server_key] = desired
     _atomic_write_json(path, config)
-    return InstallResult("Cursor", path, action, f"{server_key} -> {url}; restart Cursor")
+    return InstallResult("Cursor", path, action, f"{server_key} -> {url}; restart Cursor", warnings=warnings)
 
 
 def uninstall_cursor(*, server_key: str = SERVER_KEY, config_path: Path | None = None) -> InstallResult:
@@ -514,6 +626,11 @@ def install_windsurf(
     """
     url = url or _default_url()
     path = config_path or windsurf_config_path()
+    warnings = _collect_install_warnings(
+        "Windsurf",
+        config_dirs=(path.parent,),
+        path_binaries=("windsurf",),
+    )
     config = _read_json(path)
     config.setdefault("mcpServers", {})
 
@@ -521,12 +638,16 @@ def install_windsurf(
     existing = config["mcpServers"].get(server_key)
 
     if existing == desired:
-        return InstallResult("Windsurf", path, "unchanged", f"{server_key} already configured")
+        return InstallResult(
+            "Windsurf", path, "unchanged", f"{server_key} already configured", warnings=warnings
+        )
 
     action = "updated" if existing else "added"
     config["mcpServers"][server_key] = desired
     _atomic_write_json(path, config)
-    return InstallResult("Windsurf", path, action, f"{server_key} -> {url}; restart Windsurf")
+    return InstallResult(
+        "Windsurf", path, action, f"{server_key} -> {url}; restart Windsurf", warnings=warnings
+    )
 
 
 def uninstall_windsurf(*, server_key: str = SERVER_KEY, config_path: Path | None = None) -> InstallResult:
@@ -568,18 +689,23 @@ def install_zed(
     """
     url = url or _default_url()
     path = config_path or zed_settings_path()
+    warnings = _collect_install_warnings(
+        "Zed",
+        config_dirs=(path.parent,),
+        path_binaries=("zed",),
+    )
     config = _read_json(path)
 
     desired = {"url": url}
     existing = _get_nested(config, ["context_servers", server_key])
 
     if existing == desired:
-        return InstallResult("Zed", path, "unchanged", f"{server_key} already configured")
+        return InstallResult("Zed", path, "unchanged", f"{server_key} already configured", warnings=warnings)
 
     action = "updated" if existing else "added"
     _set_nested(config, ["context_servers", server_key], desired)
     _atomic_write_json(path, config)
-    return InstallResult("Zed", path, action, f"{server_key} -> {url}; restart Zed")
+    return InstallResult("Zed", path, action, f"{server_key} -> {url}; restart Zed", warnings=warnings)
 
 
 def uninstall_zed(*, server_key: str = SERVER_KEY, config_path: Path | None = None) -> InstallResult:
@@ -630,6 +756,10 @@ def install_continue(
     """
     url = url or _default_url()
     path = config_path or continue_config_path()
+    warnings = _collect_install_warnings(
+        "Continue.dev",
+        config_dirs=(path.parent,),
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     existing_text = path.read_text(encoding="utf-8") if path.exists() else ""
 
@@ -647,14 +777,18 @@ def install_continue(
         action = "added"
 
     if new_text == existing_text:
-        return InstallResult("Continue.dev", path, "unchanged", f"{server_key} already configured")
+        return InstallResult(
+            "Continue.dev", path, "unchanged", f"{server_key} already configured", warnings=warnings
+        )
 
     path.write_text(new_text, encoding="utf-8")
     try:
         os.chmod(path, 0o600)
     except OSError:
         pass
-    return InstallResult("Continue.dev", path, action, f"{server_key} -> {url}; restart your IDE")
+    return InstallResult(
+        "Continue.dev", path, action, f"{server_key} -> {url}; restart your IDE", warnings=warnings
+    )
 
 
 def uninstall_continue(*, server_key: str = SERVER_KEY, config_path: Path | None = None) -> InstallResult:
@@ -702,6 +836,10 @@ def install_jetbrains(
     """
     url = url or _default_url()
     path = config_path or jetbrains_config_path()
+    warnings = _collect_install_warnings(
+        "JetBrains Junie",
+        config_dirs=(path.parent,),
+    )
     config = _read_json(path)
     config.setdefault("mcpServers", {})
 
@@ -709,7 +847,13 @@ def install_jetbrains(
     existing = config["mcpServers"].get(server_key)
 
     if existing == desired:
-        return InstallResult("JetBrains Junie", path, "unchanged", f"{server_key} already configured")
+        return InstallResult(
+            "JetBrains Junie",
+            path,
+            "unchanged",
+            f"{server_key} already configured",
+            warnings=warnings,
+        )
 
     action = "updated" if existing else "added"
     config["mcpServers"][server_key] = desired
@@ -720,6 +864,7 @@ def install_jetbrains(
         action,
         f"{server_key} -> {url}; restart your JetBrains IDE "
         "(AI Assistant users: configure via Settings -> Tools -> AI Assistant -> MCP servers)",
+        warnings=warnings,
     )
 
 

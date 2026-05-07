@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.8] — 2026-05-07
+
+### Changed
+
+- **Rate limits bumped 2.5-3.3× to fit how LLM agents actually work.**
+  A single conversation routinely fans out 10-30 tool calls in a few
+  seconds when the model is reasoning across medicamentos /
+  presentaciones / fichas técnicas; the previous caps (`30/min`
+  standard, `6/min` heavy) blocked legitimate solo-user work on the
+  first turn. New per-client tiers:
+  | Tier      | Old        | New        |
+  |-----------|-----------:|-----------:|
+  | local     | `120/min`  | `300/min`  |
+  | standard  | `30/min`   | `120/min`  |
+  | document  | `10/min`   | `30/min`   |
+  | heavy     | `6/min`    | `20/min`   |
+  Upstream courtesy is preserved by the global
+  ``CIMA_FANOUT_SEMAPHORE`` (8 → 16 concurrent across all clients) and
+  ``BATCH_FANOUT_LIMIT`` (4 → 8 within a single batch endpoint). The
+  semaphore is the actual hard ceiling on concurrent CIMA traffic;
+  per-tier limits are about per-client fairness, not upstream
+  protection.
+
+### Added
+
+- **`mcp-aemps install` now detects whether the target client is
+  actually installed.** Each installer (Claude Desktop, Claude Code,
+  Codex CLI, VS Code, Cursor, Windsurf, Zed, Continue.dev,
+  JetBrains Junie) calls `_check_client_installed` against the
+  client's config directory + a launcher binary on PATH (when one
+  exists). When neither is found a yellow `NOTE:` is surfaced via the
+  CLI with a download link to the missing client. Never blocks the
+  install — the user may be pre-configuring a machine before
+  installing the client.
+- New helper `_collect_install_warnings(...)` centralises the
+  client-detection + command-prerequisite checks so future installers
+  pick up the same surface for free.
+
 ## [0.4.7] — 2026-05-07
 
 ### Fixed

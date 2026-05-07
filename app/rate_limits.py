@@ -1,24 +1,28 @@
 # app/rate_limits.py
 """Per-endpoint rate limiting + global CIMA fan-out cap.
 
-Tiers (per minute, per client IP) — basis: CIMA publishes no formal rate
-limits, but multi-tenant fairness + courtesy to AEMPS dictate caps tighter
-than what one IP can sustain alone.
+Tiers (per minute, per client IP). Tuned 2026-05-07 to fit how
+LLM agents actually work: a single conversation routinely fans out
+10-30 tool calls in a few seconds when the model is reasoning across
+medicamentos / presentaciones / fichas técnicas. The previous caps
+(30/min standard, 6/min heavy) blocked legitimate single-agent work;
+the new caps still protect upstream + multi-tenant fairness without
+acting as a candado on solo users.
 
-| Tier      | Limit     | Use case                                          |
-|-----------|-----------|---------------------------------------------------|
-| local     | 120/min   | local-only queries (no upstream cost)             |
-| standard  | 30/min    | single CIMA call                                  |
-| document  | 10/min    | HTML / PDF document fetches (large payloads)      |
-| heavy     | 6/min     | batch / multi-call endpoints (fans out N calls)   |
+| Tier      | Limit     | Burst budget    | Use case                              |
+|-----------|-----------|-----------------|---------------------------------------|
+| local     | 300/min   | ~5/s sustained  | in-process operations (no upstream)   |
+| standard  | 120/min   | ~2/s sustained  | single CIMA call                      |
+| document  | 30/min    | ~1 every 2s     | HTML / PDF document fetches           |
+| heavy     | 20/min    | ~1 every 3s     | batch / multi-call fan-out endpoints  |
+
+The actual upstream-courtesy guarantee is the global
+``CIMA_FANOUT_SEMAPHORE`` (16 concurrent — bumped from 8 in v0.4.8).
+Per-tier limits are about per-client fairness; the semaphore is what
+keeps total concurrent CIMA requests bounded across all clients.
 
 Storage: in-memory by default (no infra). If REDIS_URL is configured the
 same `limits` strategy uses Redis automatically — no code changes needed.
-
-Plus: CIMA_FANOUT_SEMAPHORE — module-level asyncio.Semaphore that caps the
-TOTAL concurrent CIMA requests this server makes upstream, regardless of
-how many clients are hitting which tier. This is the single most impactful
-defence against accidentally hammering AEMPS.
 """
 
 from __future__ import annotations
@@ -36,21 +40,28 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Per-client tiers
-LIMIT_LOCAL = RateLimitItemPerMinute(120)
-LIMIT_STANDARD = RateLimitItemPerMinute(30)
-LIMIT_DOCUMENT = RateLimitItemPerMinute(10)
-LIMIT_HEAVY = RateLimitItemPerMinute(6)
+# Per-client tiers (per minute). See module docstring for the rationale
+# behind each value — 2.5x-3.3x the v0.4.7 baseline so legitimate agent
+# bursts (10-30 calls in a few seconds when reasoning across CIMA) don't
+# trip the limiter on the first turn of a conversation.
+LIMIT_LOCAL = RateLimitItemPerMinute(300)
+LIMIT_STANDARD = RateLimitItemPerMinute(120)
+LIMIT_DOCUMENT = RateLimitItemPerMinute(30)
+LIMIT_HEAVY = RateLimitItemPerMinute(20)
 
-# Global fan-out cap: max concurrent CIMA requests this server makes upstream.
-# 8 is conservative for a multi-tenant deployment with ~50-100 active users.
-CIMA_FANOUT_LIMIT = 8
+# Global fan-out cap: max concurrent CIMA requests this server makes
+# upstream. Bumped 8 → 16 alongside the per-tier increase — single agents
+# now legitimately do 4-8 parallel calls during fan-out (listar_notas
+# across 6 nregistros, problemas_suministro multi-CN), and 8 was the
+# observed bottleneck. 16 still keeps a hard ceiling on what we send to
+# AEMPS regardless of client count.
+CIMA_FANOUT_LIMIT = 16
 CIMA_FANOUT_SEMAPHORE: asyncio.Semaphore = asyncio.Semaphore(CIMA_FANOUT_LIMIT)
 
 # Per-batch-request fan-out cap: how many parallel CIMA calls a single
 # /batch-style endpoint can spawn. Lower than the global so one batch
-# request can't monopolise the upstream channel.
-BATCH_FANOUT_LIMIT = 4
+# request can't monopolise the upstream channel. Bumped 4 → 8 to match.
+BATCH_FANOUT_LIMIT = 8
 
 _storage: Optional[Storage] = None
 _limiter: Optional[MovingWindowRateLimiter] = None
