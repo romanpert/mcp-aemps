@@ -84,6 +84,25 @@ actually work for users with legacy entries.
 
 ### Fixed
 
+- **Every JSON / TOML installer now purges legacy server-key
+  aliases on install.** Pre-rename releases shipped under
+  `aemps-cima` and `mcp-aemps-cima`; users who installed during
+  the rename window ended up with two stale entries (a working
+  `mcp-aemps` plus a dead alias pointing at `localhost:8000`).
+  Re-running `mcp-aemps install` (or any per-client subcommand)
+  now drops every alias listed in `LEGACY_SERVER_KEYS` from the
+  same write — across Claude Desktop, Claude Code, Cursor,
+  Windsurf, JetBrains Junie, Antigravity, VS Code, Zed, and Codex
+  CLI. Continue.dev's sentinel-fenced YAML block was already
+  isolated and is unaffected. Unrelated entries the user added
+  manually (e.g. a personal `weather` server) are preserved
+  exactly as written.
+- **Stale-config nudge in `mcp-aemps up`/`dev` also detects
+  legacy aliases.** The pre-existing detector only flagged a
+  legacy URL inside the `mcp-aemps` entry; it now also flags any
+  config that has a legacy alias key (`aemps-cima`,
+  `mcp-aemps-cima`) in the relevant servers map. Both signals
+  remediate the same way — re-run `mcp-aemps install`.
 - **Claude Code installer no longer reports `unchanged` without
   comparing content.** Pre-0.4.16 the installer trusted Claude
   CLI's `"already exists"` stderr and returned `unchanged` —

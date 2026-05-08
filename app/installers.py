@@ -59,10 +59,41 @@ from app.runtime_state import resolve_default_url
 
 SERVER_KEY = "mcp-aemps"
 
+# Historical server keys this project shipped under before settling on
+# ``mcp-aemps``. Whenever the user runs ``mcp-aemps install``, every
+# installer that touches a JSON-style ``mcpServers``-shaped config (or
+# its TOML equivalent for Codex) also drops any of these legacy
+# aliases — so users who installed during the rename window don't end
+# up with two stale entries (a working ``mcp-aemps`` plus a dead
+# ``aemps-cima`` pointing at the pre-v0.2 ``localhost:8000`` URL).
+# Adding a new alias here purges it across every supported client on
+# the next ``mcp-aemps install``. Single source of truth.
+LEGACY_SERVER_KEYS: tuple[str, ...] = ("aemps-cima", "mcp-aemps-cima")
+
 # Canonical stdio launcher for every installer. Single source of truth so
 # version bumps to the package spec only happen in one place.
 STDIO_COMMAND = "uvx"
 STDIO_ARGS: tuple[str, ...] = ("mcp-aemps@latest", "stdio")
+
+
+def _purge_legacy_aliases(
+    parent: dict[str, Any] | None,
+    legacy_keys: tuple[str, ...] = LEGACY_SERVER_KEYS,
+) -> tuple[str, ...]:
+    """Remove any ``legacy_keys`` entries from ``parent`` (mutating in
+    place) and return the tuple of keys that were actually present
+    and removed. ``parent`` may be ``None`` (typical when the config
+    file has no servers map yet) — returns an empty tuple in that
+    case. The caller decides whether to bump the action to
+    ``"updated"`` based on the return value."""
+    if not isinstance(parent, dict):
+        return ()
+    removed: list[str] = []
+    for key in legacy_keys:
+        if key in parent:
+            del parent[key]
+            removed.append(key)
+    return tuple(removed)
 
 
 def _stdio_block() -> dict[str, Any]:
@@ -454,6 +485,10 @@ def install_claude_desktop(
 
     warnings: list[str] = []
 
+    purged = _purge_legacy_aliases(config["mcpServers"])
+    if purged:
+        warnings.append(f"NOTE: removed legacy alias(es) {', '.join(purged)} from {path}.")
+
     if transport == "stdio":
         desired: dict[str, Any] = {"command": "uvx", "args": ["mcp-aemps@latest", "stdio"]}
         message_suffix = "(uvx auto-launch); restart Claude Desktop"
@@ -474,7 +509,7 @@ def install_claude_desktop(
         )
 
     existing = config["mcpServers"].get(server_key)
-    if existing == desired:
+    if existing == desired and not purged:
         return InstallResult(
             "Claude Desktop",
             path,
@@ -483,7 +518,7 @@ def install_claude_desktop(
             warnings=tuple(warnings),
         )
 
-    action = "updated" if existing else "added"
+    action = "updated" if (existing or purged) else "added"
     config["mcpServers"][server_key] = desired
     _atomic_write_json(path, config)
     return InstallResult(
@@ -600,8 +635,13 @@ def install_claude_code(
     # self-recover via re-installing. We now ALWAYS fall through to the
     # JSON path on non-zero exit, which reads ~/.claude.json, compares
     # against ``desired``, and correctly reports unchanged vs updated.
+    # We also pre-flight the JSON to detect legacy aliases (e.g.
+    # ``aemps-cima`` from the pre-rename era) — when present, we skip
+    # the CLI path entirely so we can purge them in the same write.
     path = config_path or claude_code_config_path()
-    cli_allowed = config_path is None and (use_cli is None or use_cli)
+    pre_config = _read_json(path) if config_path is None else _read_json(path)
+    has_legacy = any(k in (pre_config.get("mcpServers") or {}) for k in LEGACY_SERVER_KEYS)
+    cli_allowed = config_path is None and (use_cli is None or use_cli) and not has_legacy
     if cli_allowed and _claude_cli_available():
         try:
             result = subprocess.run(cli_cmd, capture_output=True, text=True, timeout=30)
@@ -621,15 +661,18 @@ def install_claude_code(
 
     config = _read_json(path)
     config.setdefault("mcpServers", {})
+    purged = _purge_legacy_aliases(config["mcpServers"])
+    if purged:
+        warnings = (*warnings, f"NOTE: removed legacy alias(es) {', '.join(purged)} from {path}.")
     desired = json_desired
     existing = config["mcpServers"].get(server_key)
 
-    if existing == desired:
+    if existing == desired and not purged:
         return InstallResult(
             "Claude Code", path, "unchanged", f"{server_key} already configured", warnings=warnings
         )
 
-    action = "updated" if existing else "added"
+    action = "updated" if (existing or purged) else "added"
     config["mcpServers"][server_key] = desired
     _atomic_write_json(path, config)
     return InstallResult("Claude Code", path, action, f"{server_key} {message_target}", warnings=warnings)
@@ -701,6 +744,38 @@ def install_codex(
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     existing_text = path.read_text(encoding="utf-8") if path.exists() else ""
+
+    # Strip legacy-alias TOML blocks (e.g. ``[mcp_servers.aemps-cima]``)
+    # alongside our own write so re-running install across all
+    # supported clients converges to one canonical entry per file.
+    purged_aliases: list[str] = []
+    for legacy_key in LEGACY_SERVER_KEYS:
+        legacy_header = f"[mcp_servers.{legacy_key}]"
+        if legacy_header not in existing_text:
+            continue
+        lines = existing_text.splitlines(keepends=True)
+        out_lines: list[str] = []
+        i = 0
+        while i < len(lines):
+            if lines[i].strip() == legacy_header:
+                i += 1
+                while i < len(lines) and not lines[i].lstrip().startswith("["):
+                    i += 1
+                # Trim trailing blank line we just orphaned.
+                while out_lines and out_lines[-1].strip() == "":
+                    out_lines.pop()
+                if out_lines:
+                    out_lines.append("\n")
+                continue
+            out_lines.append(lines[i])
+            i += 1
+        existing_text = "".join(out_lines)
+        purged_aliases.append(legacy_key)
+    if purged_aliases:
+        warnings = (
+            *warnings,
+            f"NOTE: removed legacy alias(es) {', '.join(purged_aliases)} from {path}.",
+        )
 
     if transport == "stdio":
         # TOML rendering of the stdio block. ``args`` is a TOML array of
@@ -869,6 +944,9 @@ def install_vscode(
 
     config = _read_json(path)
     config.setdefault("servers", {})
+    purged = _purge_legacy_aliases(config["servers"])
+    if purged:
+        warnings = (*warnings, f"NOTE: removed legacy alias(es) {', '.join(purged)} from {path}.")
 
     if transport == "stdio":
         desired: dict[str, Any] = _stdio_block()
@@ -885,12 +963,12 @@ def install_vscode(
         )
 
     existing = config["servers"].get(server_key)
-    if existing == desired:
+    if existing == desired and not purged:
         return InstallResult(
             "VS Code", path, "unchanged", f"{server_key} already configured", warnings=warnings
         )
 
-    action = "updated" if existing else "added"
+    action = "updated" if (existing or purged) else "added"
     config["servers"][server_key] = desired
     _atomic_write_json(path, config)
     return InstallResult("VS Code", path, action, f"{server_key} {message_suffix}", warnings=warnings)
@@ -958,6 +1036,9 @@ def install_cursor(
     )
     config = _read_json(path)
     config.setdefault("mcpServers", {})
+    purged = _purge_legacy_aliases(config["mcpServers"])
+    if purged:
+        warnings = (*warnings, f"NOTE: removed legacy alias(es) {', '.join(purged)} from {path}.")
 
     if transport == "stdio":
         desired: dict[str, Any] = _stdio_block()
@@ -975,12 +1056,12 @@ def install_cursor(
 
     existing = config["mcpServers"].get(server_key)
 
-    if existing == desired:
+    if existing == desired and not purged:
         return InstallResult(
             "Cursor", path, "unchanged", f"{server_key} already configured", warnings=warnings
         )
 
-    action = "updated" if existing else "added"
+    action = "updated" if (existing or purged) else "added"
     config["mcpServers"][server_key] = desired
     _atomic_write_json(path, config)
     return InstallResult("Cursor", path, action, f"{server_key} {message_suffix}", warnings=warnings)
@@ -1032,6 +1113,9 @@ def install_windsurf(
     )
     config = _read_json(path)
     config.setdefault("mcpServers", {})
+    purged = _purge_legacy_aliases(config["mcpServers"])
+    if purged:
+        warnings = (*warnings, f"NOTE: removed legacy alias(es) {', '.join(purged)} from {path}.")
 
     if transport == "stdio":
         desired: dict[str, Any] = _stdio_block()
@@ -1049,12 +1133,12 @@ def install_windsurf(
 
     existing = config["mcpServers"].get(server_key)
 
-    if existing == desired:
+    if existing == desired and not purged:
         return InstallResult(
             "Windsurf", path, "unchanged", f"{server_key} already configured", warnings=warnings
         )
 
-    action = "updated" if existing else "added"
+    action = "updated" if (existing or purged) else "added"
     config["mcpServers"][server_key] = desired
     _atomic_write_json(path, config)
     return InstallResult("Windsurf", path, action, f"{server_key} {message_suffix}", warnings=warnings)
@@ -1109,6 +1193,9 @@ def install_zed(
         path_binaries=("zed",),
     )
     config = _read_json(path)
+    purged = _purge_legacy_aliases(config.get("context_servers"))
+    if purged:
+        warnings = (*warnings, f"NOTE: removed legacy alias(es) {', '.join(purged)} from {path}.")
 
     if transport == "stdio":
         # Zed validates the shape of ``env`` even when empty. Drop the
@@ -1133,10 +1220,10 @@ def install_zed(
 
     existing = _get_nested(config, ["context_servers", server_key])
 
-    if existing == desired:
+    if existing == desired and not purged:
         return InstallResult("Zed", path, "unchanged", f"{server_key} already configured", warnings=warnings)
 
-    action = "updated" if existing else "added"
+    action = "updated" if (existing or purged) else "added"
     _set_nested(config, ["context_servers", server_key], desired)
     _atomic_write_json(path, config)
     return InstallResult("Zed", path, action, f"{server_key} {message_suffix}", warnings=warnings)
@@ -1322,6 +1409,9 @@ def install_jetbrains(
     )
     config = _read_json(path)
     config.setdefault("mcpServers", {})
+    purged = _purge_legacy_aliases(config["mcpServers"])
+    if purged:
+        warnings = (*warnings, f"NOTE: removed legacy alias(es) {', '.join(purged)} from {path}.")
 
     if transport == "stdio":
         desired: dict[str, Any] = _stdio_block()
@@ -1339,7 +1429,7 @@ def install_jetbrains(
 
     existing = config["mcpServers"].get(server_key)
 
-    if existing == desired:
+    if existing == desired and not purged:
         return InstallResult(
             "JetBrains Junie",
             path,
@@ -1348,7 +1438,7 @@ def install_jetbrains(
             warnings=warnings,
         )
 
-    action = "updated" if existing else "added"
+    action = "updated" if (existing or purged) else "added"
     config["mcpServers"][server_key] = desired
     _atomic_write_json(path, config)
     return InstallResult(
@@ -1426,6 +1516,9 @@ def install_antigravity(
     path.parent.mkdir(parents=True, exist_ok=True)
     config = _read_json(path)
     config.setdefault("mcpServers", {})
+    purged = _purge_legacy_aliases(config["mcpServers"])
+    if purged:
+        warnings = (*warnings, f"NOTE: removed legacy alias(es) {', '.join(purged)} from {path}.")
 
     if transport == "stdio":
         desired: dict[str, Any] = _stdio_block()
@@ -1444,12 +1537,12 @@ def install_antigravity(
 
     existing = config["mcpServers"].get(server_key)
 
-    if existing == desired:
+    if existing == desired and not purged:
         return InstallResult(
             "Antigravity", path, "unchanged", f"{server_key} already configured", warnings=warnings
         )
 
-    action = "updated" if existing else "added"
+    action = "updated" if (existing or purged) else "added"
     config["mcpServers"][server_key] = desired
     _atomic_write_json(path, config)
     return InstallResult(

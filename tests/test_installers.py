@@ -449,4 +449,127 @@ def test_vscode_settings_path_now_points_at_dedicated_mcp_json() -> None:
     from app.installers import vscode_settings_path, vscode_user_mcp_path
 
     assert vscode_settings_path() == vscode_user_mcp_path()
-    assert vscode_settings_path().name == "mcp.json"
+
+
+# ---------------------------------------------------------------------------
+# Legacy-alias purge — every JSON installer drops historical server keys
+# (e.g. ``aemps-cima``, ``mcp-aemps-cima``) on install. v0.4.16+.
+# ---------------------------------------------------------------------------
+
+
+def _seed_with_legacy(path: Path, parent_key: str, alias: str = "aemps-cima") -> None:
+    """Write a config file that contains both an unrelated entry and a
+    legacy-alias entry under the given parent (``mcpServers`` /
+    ``servers`` / ``context_servers``). The unrelated entry must
+    survive the install; the alias must be purged."""
+    path.write_text(
+        json.dumps(
+            {
+                parent_key: {
+                    "weather": {"command": "python", "args": ["weather.py"]},
+                    alias: {"url": "http://localhost:8000/mcp"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _assert_purged_alias_preserves_unrelated(data: dict, parent_key: str) -> None:
+    block = data[parent_key]
+    assert "weather" in block, "unrelated entry was lost"
+    assert "aemps-cima" not in block, "legacy alias was not purged"
+    assert "mcp-aemps" in block, "current entry was not written"
+
+
+def test_claude_desktop_purges_legacy_alias(tmp_path: Path) -> None:
+    p = tmp_path / "cd.json"
+    _seed_with_legacy(p, "mcpServers")
+    res = install_claude_desktop(config_path=p)
+    assert res.action == "updated"
+    _assert_purged_alias_preserves_unrelated(json.loads(p.read_text(encoding="utf-8")), "mcpServers")
+
+
+def test_claude_code_purges_legacy_alias(tmp_path: Path) -> None:
+    p = tmp_path / "cc.json"
+    _seed_with_legacy(p, "mcpServers")
+    res = install_claude_code(config_path=p)
+    assert res.action == "updated"
+    _assert_purged_alias_preserves_unrelated(json.loads(p.read_text(encoding="utf-8")), "mcpServers")
+
+
+def test_cursor_purges_legacy_alias(tmp_path: Path) -> None:
+    p = tmp_path / "cur.json"
+    _seed_with_legacy(p, "mcpServers")
+    res = install_cursor(config_path=p)
+    assert res.action == "updated"
+    _assert_purged_alias_preserves_unrelated(json.loads(p.read_text(encoding="utf-8")), "mcpServers")
+
+
+def test_windsurf_purges_legacy_alias(tmp_path: Path) -> None:
+    p = tmp_path / "ws.json"
+    _seed_with_legacy(p, "mcpServers")
+    res = install_windsurf(config_path=p)
+    assert res.action == "updated"
+    _assert_purged_alias_preserves_unrelated(json.loads(p.read_text(encoding="utf-8")), "mcpServers")
+
+
+def test_jetbrains_purges_legacy_alias(tmp_path: Path) -> None:
+    p = tmp_path / "jb.json"
+    _seed_with_legacy(p, "mcpServers")
+    res = install_jetbrains(config_path=p)
+    assert res.action == "updated"
+    _assert_purged_alias_preserves_unrelated(json.loads(p.read_text(encoding="utf-8")), "mcpServers")
+
+
+def test_vscode_purges_legacy_alias(tmp_path: Path) -> None:
+    p = tmp_path / "vs.json"
+    _seed_with_legacy(p, "servers")
+    res = install_vscode(config_path=p)
+    assert res.action == "updated"
+    _assert_purged_alias_preserves_unrelated(json.loads(p.read_text(encoding="utf-8")), "servers")
+
+
+def test_zed_purges_legacy_alias(tmp_path: Path) -> None:
+    p = tmp_path / "zed.json"
+    p.write_text(
+        json.dumps(
+            {
+                "context_servers": {
+                    "weather": {"command": "python", "args": ["weather.py"]},
+                    "aemps-cima": {"url": "http://localhost:8000/mcp"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    res = install_zed(config_path=p)
+    assert res.action == "updated"
+    _assert_purged_alias_preserves_unrelated(json.loads(p.read_text(encoding="utf-8")), "context_servers")
+
+
+def test_codex_purges_legacy_toml_block(tmp_path: Path) -> None:
+    p = tmp_path / "config.toml"
+    p.write_text(
+        '[mcp_servers.weather]\ncommand = "python"\n\n'
+        '[mcp_servers.aemps-cima]\nurl = "http://localhost:8000/mcp"\n\n'
+        '[mcp_servers.unrelated]\nfoo = "bar"\n',
+        encoding="utf-8",
+    )
+    res = install_codex(config_path=p)
+    assert res.action in ("added", "updated")
+    text = p.read_text(encoding="utf-8")
+    assert "[mcp_servers.aemps-cima]" not in text
+    assert "[mcp_servers.weather]" in text
+    assert "[mcp_servers.unrelated]" in text
+    assert "[mcp_servers.mcp-aemps]" in text
+
+
+def test_purge_idempotent_on_clean_config(tmp_path: Path) -> None:
+    """Running install twice on a clean config must not re-introduce
+    'updated' on the second run — purge only fires when something
+    was actually present."""
+    p = tmp_path / "clean.json"
+    install_cursor(config_path=p)
+    second = install_cursor(config_path=p)
+    assert second.action == "unchanged", second

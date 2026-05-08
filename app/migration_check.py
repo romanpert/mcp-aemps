@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from app.installers import (
+    LEGACY_SERVER_KEYS,
     SERVER_KEY,
     antigravity_config_path,
     claude_code_config_path,
@@ -147,11 +148,52 @@ def _extract_entry_text(path: Path, raw: str) -> Optional[str]:
     return None
 
 
+def _has_legacy_alias(path: Path, raw: str) -> Optional[str]:
+    """Return the first legacy server-key alias (e.g. ``aemps-cima``)
+    found as a configured key inside ``raw``. The match is checked
+    against per-format markers to avoid false positives from e.g.
+    a comment that mentions the alias.
+
+    Returns the alias name if present, ``None`` otherwise."""
+    suffix = path.suffix.lower()
+    if suffix in (".json", ".jsonc"):
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(data, dict):
+            return None
+        for parent_key in ("mcpServers", "servers", "context_servers"):
+            block = data.get(parent_key)
+            if isinstance(block, dict):
+                for legacy_key in LEGACY_SERVER_KEYS:
+                    if legacy_key in block:
+                        return legacy_key
+        return None
+    if suffix == ".toml":
+        for legacy_key in LEGACY_SERVER_KEYS:
+            if f"[mcp_servers.{legacy_key}]" in raw:
+                return legacy_key
+        return None
+    if suffix in (".yaml", ".yml"):
+        for legacy_key in LEGACY_SERVER_KEYS:
+            if f"name: {legacy_key}" in raw:
+                return legacy_key
+        return None
+    return None
+
+
 def find_stale_configs() -> list[StaleConfig]:
-    """Scan all known client config files for legacy mcp-aemps
-    references inside *our* entry. Returns at most one StaleConfig
-    per client (the first matching pattern wins) so the CLI nudge
-    stays compact."""
+    """Scan all known client config files for either a legacy URL
+    inside our ``mcp-aemps`` entry, or a legacy server-key alias
+    (``aemps-cima``, etc.) anywhere in the relevant servers map.
+    Returns at most one StaleConfig per client (the first matching
+    signal wins) so the CLI nudge stays compact.
+
+    Both signals are remediable by re-running ``mcp-aemps install``:
+    legacy URLs get rewritten to the current desired entry; legacy
+    aliases are purged from the same write (see
+    ``app.installers._purge_legacy_aliases``)."""
     out: list[StaleConfig] = []
     for client, resolver in _CONFIG_PATH_RESOLVERS.items():
         try:
@@ -166,13 +208,19 @@ def find_stale_configs() -> list[StaleConfig]:
         except OSError:
             logger.debug("could not read %s", path, exc_info=True)
             continue
+        # Signal 1: legacy URL inside our managed entry.
         entry = _extract_entry_text(path, raw)
-        if entry is None:
-            continue
-        for pattern in _LEGACY_SUBSTRINGS:
-            if pattern in entry:
-                out.append(StaleConfig(client=client, path=path, legacy_pattern=pattern))
-                break
+        if entry is not None:
+            url_hit = next((p for p in _LEGACY_SUBSTRINGS if p in entry), None)
+            if url_hit is not None:
+                out.append(StaleConfig(client=client, path=path, legacy_pattern=url_hit))
+                continue
+        # Signal 2: legacy server-key alias anywhere in the servers
+        # map. Surfaced as a stale config so the CLI nudges the user
+        # to run install (which purges aliases automatically).
+        alias_hit = _has_legacy_alias(path, raw)
+        if alias_hit is not None:
+            out.append(StaleConfig(client=client, path=path, legacy_pattern=f"alias: {alias_hit}"))
     return out
 
 

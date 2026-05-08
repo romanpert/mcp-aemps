@@ -123,16 +123,18 @@ def test_find_returns_stale_when_legacy_in_our_entry(tmp_json, monkeypatch):
     assert out[0].legacy_pattern in _LEGACY_SUBSTRINGS
 
 
-def test_find_ignores_legacy_in_unrelated_alias(tmp_json, monkeypatch):
-    """The user's actual case: a pre-rename ``aemps-cima`` alias in
-    Cursor's mcp.json contains a legacy URL, but our mcp-aemps entry
-    is correct. Must NOT flag — that alias is not ours to migrate."""
+def test_find_does_not_flag_legacy_url_outside_our_entry_when_no_alias(tmp_json, monkeypatch):
+    """Legacy URL inside a NON-legacy unrelated key (e.g. user-named
+    ``my-server``) must not flag — that's the user's tool, none of
+    our business. Only legacy URLs in our entry, OR any of the
+    KNOWN legacy aliases (covered by Signal 2 below), trigger a
+    nudge."""
     p = tmp_json(
         "cursor.json",
         {
             "mcpServers": {
                 "mcp-aemps": {"type": "stdio", "command": "uvx", "args": ["mcp-aemps@latest", "stdio"]},
-                "aemps-cima": {"url": "http://localhost:8000/mcp"},
+                "my-server": {"url": "http://localhost:8000/mcp"},
             }
         },
     )
@@ -187,4 +189,82 @@ def test_find_handles_unreadable_file(tmp_path, monkeypatch):
 
     monkeypatch.setattr(Path, "read_text", _explode)
     _patch_resolvers(monkeypatch, {"Z": lambda: p})
+    assert find_stale_configs() == []
+
+
+# ---------------------------------------------------------------------------
+# Legacy-alias detection (Signal 2)
+# ---------------------------------------------------------------------------
+
+
+def test_find_detects_legacy_alias_aemps_cima(tmp_json, monkeypatch):
+    """A pre-rename ``aemps-cima`` key alongside the current
+    ``mcp-aemps`` entry must be flagged so the CLI nudge tells the
+    user to run install (which purges aliases automatically)."""
+    p = tmp_json(
+        "cursor.json",
+        {
+            "mcpServers": {
+                "mcp-aemps": {"type": "stdio", "command": "uvx"},
+                "aemps-cima": {"url": "http://example.com/anything"},
+            }
+        },
+    )
+    _patch_resolvers(monkeypatch, {"Cursor": lambda: p})
+    out = find_stale_configs()
+    assert len(out) == 1
+    assert out[0].legacy_pattern == "alias: aemps-cima"
+
+
+def test_find_detects_legacy_alias_in_vscode_servers_map(tmp_json, monkeypatch):
+    """VS Code's dedicated mcp.json uses ``servers``, not ``mcpServers``."""
+    p = tmp_json("vscode.json", {"servers": {"mcp-aemps-cima": {"command": "x"}}})
+    _patch_resolvers(monkeypatch, {"VS Code": lambda: p})
+    out = find_stale_configs()
+    assert len(out) == 1 and out[0].legacy_pattern == "alias: mcp-aemps-cima"
+
+
+def test_find_detects_legacy_alias_in_zed_context_servers(tmp_json, monkeypatch):
+    p = tmp_json("zed.json", {"context_servers": {"aemps-cima": {"command": "x"}}})
+    _patch_resolvers(monkeypatch, {"Zed": lambda: p})
+    out = find_stale_configs()
+    assert len(out) == 1 and out[0].legacy_pattern == "alias: aemps-cima"
+
+
+def test_find_detects_legacy_alias_in_codex_toml(tmp_path, monkeypatch):
+    p = tmp_path / "codex.toml"
+    p.write_text(
+        '[mcp_servers.mcp-aemps]\ncommand = "uvx"\n\n[mcp_servers.aemps-cima]\nurl = "http://x"\n',
+        encoding="utf-8",
+    )
+    _patch_resolvers(monkeypatch, {"Codex CLI": lambda: p})
+    out = find_stale_configs()
+    assert len(out) == 1 and out[0].legacy_pattern == "alias: aemps-cima"
+
+
+def test_find_url_signal_takes_priority_over_alias(tmp_json, monkeypatch):
+    """If both signals hit, the URL signal wins (it's the more
+    specific 'this entry needs to be rewritten' signal)."""
+    p = tmp_json(
+        "x.json",
+        {
+            "mcpServers": {
+                "mcp-aemps": {"url": "http://localhost:8000/mcp"},
+                "aemps-cima": {"url": "http://x"},
+            }
+        },
+    )
+    _patch_resolvers(monkeypatch, {"X": lambda: p})
+    out = find_stale_configs()
+    assert len(out) == 1
+    assert out[0].legacy_pattern in _LEGACY_SUBSTRINGS  # URL signal, not "alias: ..."
+
+
+def test_find_no_alias_no_url_no_flag(tmp_json, monkeypatch):
+    """Clean config with the current canonical entry — must not flag."""
+    p = tmp_json(
+        "clean.json",
+        {"mcpServers": {"mcp-aemps": {"type": "stdio", "command": "uvx"}}},
+    )
+    _patch_resolvers(monkeypatch, {"Clean": lambda: p})
     assert find_stale_configs() == []
