@@ -7,11 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.16] — 2026-05-08
 
-Pre-1.0 hardening backlog landed as a single PATCH (per maintainer
-direction) rather than the v0.5.0 bundle the roadmap originally
-scoped. Three of the four items are **secure-by-default flips that
+Two-track release: (1) the pre-1.0 hardening backlog from the
+v0.4.15 audit, plus (2) two installer bugs surfaced when a
+maintainer test run showed stale legacy configs were not migrating.
+
+Three of the hardening items are **secure-by-default flips that
 break existing deployments** which relied on the previous lax
-defaults — read each item before upgrading.
+defaults — read each before upgrading. The installer fixes are
+non-breaking for anyone whose configs were already correct;
+they make the canonical migration path (`mcp-aemps install`)
+actually work for users with legacy entries.
 
 ### Security
 
@@ -60,6 +65,56 @@ defaults — read each item before upgrading.
   flags. Convenience over `--uvicorn-host 0.0.0.0` for the Docker
   / reverse-proxy use case. Overrides `--uvicorn-host` when both
   are passed.
+- **CLI nudge: outdated mcp-aemps configs detected.** `mcp-aemps
+  up`/`dev` now scan installed MCP-client configs for legacy
+  default URLs (specifically `localhost:8000`, the pre-v0.2 default
+  port that some users still have in their client configs from
+  pre-v0.4 installs) inside our own `mcp-aemps` entry. When
+  detected, prints a yellow advisory panel pointing at
+  `mcp-aemps install` for migration. Read-only — never rewrites
+  any file. Detection scoped to *our* entry, so unrelated legacy
+  aliases under the same `mcpServers` map (e.g. a pre-rename
+  `aemps-cima`) do not produce false positives.
+- **CLI nudge: outdated mcp-aemps package.** `mcp-aemps up`/`dev`
+  also pings PyPI synchronously (2-second timeout) and prints a
+  yellow advisory panel if the running version is behind the
+  latest release. The pre-existing async lifespan check stays for
+  background-deployment paths (Docker, systemd) where the CLI
+  banner is not visible. Respects `MCP_AEMPS_SKIP_UPDATE_CHECK=1`.
+
+### Fixed
+
+- **Claude Code installer no longer reports `unchanged` without
+  comparing content.** Pre-0.4.16 the installer trusted Claude
+  CLI's `"already exists"` stderr and returned `unchanged` —
+  blocking users with stale legacy entries (e.g. the user-reported
+  `http://localhost:8000/mcp` from years-old installs) from
+  self-recovering by re-running `mcp-aemps install`. The CLI path
+  now only short-circuits on a clean (exit-zero) add; any other
+  exit falls through to the JSON-direct path which reads
+  `~/.claude.json`, compares against the desired block, and
+  correctly reports `unchanged` vs `updated`.
+- **Tighter installer detection — drop the config-dir heuristic.**
+  Pre-0.4.16 `_check_client_installed` treated the existence of a
+  client's user-config directory (e.g. `%APPDATA%\Claude\`,
+  `~/.cursor/`) as evidence the client was installed. But
+  pre-v0.4.13 mcp-aemps installers themselves *created* those
+  directories when writing the config — so the dir survived even
+  when the user never installed (or had uninstalled) the client,
+  producing systematic false-positive "client detected" reports.
+  Detection now requires either a binary on `$PATH` or one of the
+  application's own install paths (per-OS) to exist:
+  - Claude Desktop: `%LOCALAPPDATA%\AnthropicClaude\` /
+    `/Applications/Claude.app` / `/snap/claude-desktop`.
+  - VS Code, Cursor, Windsurf, Zed, Antigravity: per-OS
+    `Programs\<App>\<App>.exe` / `/Applications/<App>.app` /
+    `/snap/bin/<app>` etc.
+  - Continue.dev: requires the host VS Code / Cursor / Windsurf
+    extension dir.
+  - JetBrains Junie: requires the JetBrains IDE config root.
+  The `config_dirs` parameter on `_check_client_installed` and
+  `_client_not_detected_skip` stays for back-compat with downstream
+  installers in private repos but is ignored.
 
 ## [0.4.15] — 2026-05-07
 

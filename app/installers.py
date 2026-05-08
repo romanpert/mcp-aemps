@@ -96,10 +96,116 @@ class InstallResult:
     warnings: tuple[str, ...] = ()
 
 
+def _app_executables(client_name: str) -> tuple[Path, ...]:
+    """Per-client, per-OS absolute paths where the *application's own*
+    binary or app bundle lives. Used by detection (``_check_client_installed``
+    and ``_client_not_detected_skip``) as a stronger signal than
+    ``config_dirs`` — the latter were created by mcp-aemps itself in
+    pre-v0.4.13 versions and survive uninstalls, producing perpetual
+    false-positive "client detected" reports.
+
+    Returns paths appropriate for ``sys.platform``; empty tuple for
+    clients where ``path_binaries`` is the only meaningful signal
+    (CLI-only tools like Claude Code, Codex CLI). Only includes paths
+    that the application's own installer / packager creates — never
+    paths that mcp-aemps writes to.
+    """
+    plat = sys.platform
+    home = Path.home()
+    local = Path(os.environ.get("LOCALAPPDATA", "")) if plat == "win32" else None
+    programs = Path(os.environ.get("PROGRAMFILES", "")) if plat == "win32" else None
+
+    if client_name == "Claude Desktop":
+        if plat == "win32" and local:
+            return (
+                local / "AnthropicClaude",  # Squirrel installer dir (versioned subdirs inside)
+                local / "Programs" / "Claude",
+            )
+        if plat == "darwin":
+            return (Path("/Applications/Claude.app"),)
+        return (
+            Path("/snap/claude-desktop"),
+            home / ".local" / "share" / "applications" / "claude-desktop.desktop",
+        )
+    if client_name == "VS Code":
+        if plat == "win32" and local and programs:
+            return (
+                local / "Programs" / "Microsoft VS Code" / "Code.exe",
+                programs / "Microsoft VS Code" / "Code.exe",
+            )
+        if plat == "darwin":
+            return (Path("/Applications/Visual Studio Code.app"),)
+        return (
+            Path("/usr/share/code/code"),
+            Path("/snap/bin/code"),
+            Path("/usr/bin/code"),
+        )
+    if client_name == "Cursor":
+        if plat == "win32" and local:
+            return (local / "Programs" / "cursor" / "Cursor.exe",)
+        if plat == "darwin":
+            return (Path("/Applications/Cursor.app"),)
+        return (
+            Path("/opt/Cursor/cursor"),
+            Path("/usr/bin/cursor"),
+            home / ".local" / "bin" / "cursor",
+        )
+    if client_name == "Windsurf":
+        if plat == "win32" and local:
+            return (local / "Programs" / "Windsurf" / "Windsurf.exe",)
+        if plat == "darwin":
+            return (Path("/Applications/Windsurf.app"),)
+        return (Path("/usr/share/windsurf/windsurf"),)
+    if client_name == "Zed":
+        if plat == "win32" and local:
+            return (local / "Programs" / "Zed" / "Zed.exe",)
+        if plat == "darwin":
+            return (Path("/Applications/Zed.app"),)
+        return (
+            Path("/snap/bin/zed"),
+            Path("/usr/local/bin/zed"),
+            home / ".local" / "bin" / "zed",
+        )
+    if client_name == "Continue.dev":
+        # VS Code extension; detection requires the host IDE installed
+        # AND a Continue extension dir present (the extension itself
+        # creates these — mcp-aemps only touches ~/.continue/config.yaml).
+        # We approximate by requiring any extensions dir variant.
+        return (
+            home / ".vscode" / "extensions",
+            home / ".vscode-insiders" / "extensions",
+            home / ".cursor" / "extensions",
+            home / ".windsurf" / "extensions",
+        )
+    if client_name == "JetBrains Junie":
+        # Junie is a JetBrains IDE plugin — require any JetBrains IDE
+        # config root (the IDE creates these, mcp-aemps doesn't touch
+        # them). Plugin presence is too brittle to detect generically.
+        if plat == "win32":
+            appdata = Path(os.environ.get("APPDATA", "")) if os.environ.get("APPDATA") else None
+            return (appdata / "JetBrains",) if appdata else ()
+        if plat == "darwin":
+            return (home / "Library" / "Application Support" / "JetBrains",)
+        return (home / ".config" / "JetBrains",)
+    if client_name == "Antigravity":
+        if plat == "win32" and local:
+            return (
+                local / "Programs" / "Antigravity" / "antigravity.exe",
+                local / "Programs" / "antigravity" / "antigravity.exe",
+            )
+        if plat == "darwin":
+            return (Path("/Applications/Antigravity.app"),)
+        return (
+            Path("/usr/bin/antigravity"),
+            home / ".local" / "bin" / "antigravity",
+        )
+    return ()
+
+
 def _client_not_detected_skip(
     client_name: str,
     path: "Path",
-    config_dirs: tuple["Path", ...],
+    config_dirs: tuple["Path", ...],  # noqa: ARG001 — kept for back-compat with extra installers
     path_binaries: tuple[str, ...],
 ) -> "InstallResult | None":
     """Return a "skipped" InstallResult if the client isn't detected.
@@ -115,14 +221,23 @@ def _client_not_detected_skip(
     an explanatory message + install hint. Caller can override with
     ``force=True`` for provisioning scripts that want to pre-stage.
 
+    Detection (v0.4.16+): require either a binary on ``$PATH`` (for
+    CLI tools) or one of the application's own install paths to
+    exist (for desktop apps). The pre-v0.4.16 ``config_dirs`` heuristic
+    was unreliable because mcp-aemps itself created those directories
+    in releases before v0.4.13 — so a config dir existing meant
+    "we wrote here once" rather than "the client is installed". The
+    parameter is kept for back-compat with downstream installers in
+    private repos but is ignored.
+
     Each ``install_*`` also short-circuits the detection check when an
     explicit ``config_path`` is passed — that signals the caller knows
     where they want the file written (tests, IaC, dotfile repos), so
     we don't second-guess them with a detection probe that might fail
     on a CI runner where no IDE is installed."""
-    if any(d.exists() for d in config_dirs):
-        return None
     if any(shutil.which(b) for b in path_binaries):
+        return None
+    if any(p.exists() for p in _app_executables(client_name)):
         return None
 
     hint = _CLIENT_INSTALL_HINTS.get(client_name, "")
@@ -207,33 +322,38 @@ def _collect_install_warnings(
 def _check_client_installed(
     client_name: str,
     *,
-    config_dirs: tuple[Path, ...] = (),
+    config_dirs: tuple[Path, ...] = (),  # noqa: ARG001 — kept for back-compat with extra installers
     path_binaries: tuple[str, ...] = (),
 ) -> str | None:
     """Return a NOTE warning if the target client doesn't appear to be
     installed, else ``None``.
 
-    Detection is deliberately permissive — false negatives (warning
-    when client is actually installed elsewhere) are far worse than
-    false positives. The check is True if **any** of:
-    - any directory in ``config_dirs`` exists (the client created its
-      profile, has been launched at least once);
-    - any binary in ``path_binaries`` resolves on PATH (CLI tools).
+    Detection (v0.4.16+) requires either a binary on ``$PATH`` or one
+    of the application's own install paths (per
+    ``_app_executables``) to exist. Pre-v0.4.16 the function also
+    treated ``config_dirs`` presence as evidence of installation;
+    that produced systematic false positives because mcp-aemps
+    itself created those directories in pre-v0.4.13 releases. The
+    ``config_dirs`` parameter stays in the signature so downstream
+    installers in private repos don't break, but is ignored.
 
     NEVER blocks the install — the user may be deliberately
     pre-configuring the machine before installing the client."""
-    if any(d.exists() for d in config_dirs):
-        return None
     if any(shutil.which(b) for b in path_binaries):
+        return None
+    if any(p.exists() for p in _app_executables(client_name)):
         return None
 
     hint = _CLIENT_INSTALL_HINTS.get(client_name, "")
     suffix = f"  Install: {hint}" if hint else ""
-    paths = ", ".join(str(d) for d in config_dirs) or "<no path heuristic>"
+    bin_hint = ", ".join(path_binaries) if path_binaries else None
+    app_paths = _app_executables(client_name)
+    app_hint = ", ".join(str(p) for p in app_paths) if app_paths else None
+    where_parts = [s for s in (bin_hint, app_hint) if s]
+    where = "; ".join(where_parts) if where_parts else "<no install heuristic>"
     return (
-        f"NOTE: {client_name} doesn't appear to be installed (no profile "
-        f"directory at: {paths}). Config has been written for when you "
-        f"install it.{suffix}"
+        f"NOTE: {client_name} doesn't appear to be installed (looked for: "
+        f"{where}). Config has been written for when you install it.{suffix}"
     )
 
 
@@ -470,6 +590,17 @@ def install_claude_code(
             f"NOTE: http transport requires a running server at {url}.",
         )
 
+    # CLI-first attempt. Only short-circuits the JSON path on a *clean*
+    # add (`claude mcp add` exited 0). The pre-v0.4.16 path also returned
+    # early on stderr "already exists" — but that branch trusted Claude
+    # CLI's existence-check without comparing the existing entry to
+    # ``desired``. When the existing entry was a stale legacy http URL
+    # (every install before stdio became the default) the installer
+    # silently reported "unchanged" and the user had no path to
+    # self-recover via re-installing. We now ALWAYS fall through to the
+    # JSON path on non-zero exit, which reads ~/.claude.json, compares
+    # against ``desired``, and correctly reports unchanged vs updated.
+    path = config_path or claude_code_config_path()
     cli_allowed = config_path is None and (use_cli is None or use_cli)
     if cli_allowed and _claude_cli_available():
         try:
@@ -482,19 +613,12 @@ def install_claude_code(
                     f"{server_key} {message_target} (scope={scope})",
                     warnings=warnings,
                 )
-            stderr = (result.stderr or "").lower()
-            if "already exists" in stderr or "already configured" in stderr:
-                return InstallResult(
-                    "Claude Code",
-                    Path("(via `claude mcp add`)"),
-                    "unchanged",
-                    f"{server_key} already configured",
-                    warnings=warnings,
-                )
+            # Non-zero exit (typically "already exists"): fall through to
+            # the JSON path. Don't return "unchanged" here — only the
+            # content comparison below can tell us that truthfully.
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
 
-    path = config_path or claude_code_config_path()
     config = _read_json(path)
     config.setdefault("mcpServers", {})
     desired = json_desired

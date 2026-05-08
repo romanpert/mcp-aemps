@@ -91,6 +91,77 @@ def _resolve_port(requested: int, *, auto: bool, bind_host: str) -> int:
     return free
 
 
+def _print_stale_config_nudge() -> None:
+    """If any installed MCP client config still references a legacy
+    mcp-aemps default (e.g. the pre-v0.2 ``localhost:8000`` URL),
+    print a yellow advisory panel pointing to ``mcp-aemps install``.
+    Read-only; never rewrites configs."""
+    try:
+        from app.migration_check import find_stale_configs
+    except Exception:  # pragma: no cover — never break the CLI on import errors
+        return
+    try:
+        stale = find_stale_configs()
+    except Exception:
+        return
+    if not stale:
+        return
+    body_lines = [
+        "[bold yellow]⚠️  Outdated mcp-aemps configs detected:[/]",
+        "",
+    ]
+    for s in stale:
+        body_lines.append(f"  • [bold]{s.client}[/] · [dim]{s.path}[/]")
+        body_lines.append(f"      legacy: [red]{s.legacy_pattern}[/]")
+    body_lines.append("")
+    body_lines.append("  Run [bold green]mcp-aemps install[/] to migrate to the current pattern.")
+    body_lines.append(
+        "  [dim]The current default is stdio (`uvx mcp-aemps@latest stdio`); the "
+        "http URL is from a pre-v0.2 default that no longer matches.[/]"
+    )
+    console.print(Panel("\n".join(body_lines), border_style="yellow", padding=(1, 2)))
+
+
+def _print_outdated_package_nudge() -> None:
+    """If a newer mcp-aemps version is published on PyPI, print a
+    yellow advisory panel with the upgrade command. Skipped when
+    ``MCP_AEMPS_SKIP_UPDATE_CHECK`` is set, when the running version
+    cannot be parsed, or when the network call fails — best-effort,
+    never blocks startup."""
+    if os.environ.get("MCP_AEMPS_SKIP_UPDATE_CHECK", "").strip() in {"1", "true", "TRUE", "yes"}:
+        return
+    try:
+        from app.version_check import _parse_version  # type: ignore[attr-defined]
+    except Exception:  # pragma: no cover
+        return
+    try:
+        with httpx.Client(timeout=2.0) as client:
+            resp = client.get("https://pypi.org/pypi/mcp-aemps/json")
+            resp.raise_for_status()
+            latest = (resp.json().get("info") or {}).get("version")
+    except Exception:
+        return
+    if not latest:
+        return
+    running = settings.mcp_aemps_version
+    rp, lp = _parse_version(running), _parse_version(latest)
+    if rp is None or lp is None or rp >= lp:
+        return
+    console.print(
+        Panel(
+            (
+                f"[bold yellow]⚠️  mcp-aemps {running} is outdated — "
+                f"latest on PyPI is {latest}.[/]\n\n"
+                f"  Upgrade: [bold green]pip install --upgrade mcp-aemps[/]\n"
+                f"  Or with uvx: [bold green]uvx mcp-aemps@latest stdio[/]\n\n"
+                f"  [dim]Set MCP_AEMPS_SKIP_UPDATE_CHECK=1 to silence this check.[/]"
+            ),
+            border_style="yellow",
+            padding=(1, 2),
+        )
+    )
+
+
 @cli.callback(invoke_without_command=True)
 def main(ctx: typer.Context):
     if ctx.invoked_subcommand is None:
@@ -122,6 +193,8 @@ def up(
 ):
     """Start the server (production mode, no autoreload)."""
     _banner()
+    _print_outdated_package_nudge()
+    _print_stale_config_nudge()
     _ensure_state_dir()
 
     if bind_all:
@@ -198,6 +271,8 @@ def dev(
 ):
     """Start the server with --reload for development."""
     _banner()
+    _print_outdated_package_nudge()
+    _print_stale_config_nudge()
     _ensure_state_dir()
     if bind_all:
         uvicorn_host = BIND_ALL_HOST
