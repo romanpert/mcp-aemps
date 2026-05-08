@@ -89,20 +89,32 @@ network policy (firewall, VPC security group, reverse-proxy allow
 rules, or loopback-only bind) when the listener is exposed to
 untrusted neighbours. See the hardening checklist below.
 
-## Transport security (v0.4.5+)
+## Transport security (v0.4.5+, hardened in v0.4.16)
 
-`MCP_AEMPS_DNS_REBINDING_PROTECTION` (default `false`) gates host /
-origin validation on the Streamable-HTTP endpoint. Default off because
-the threat model — read-only public data, OAuth audience binding —
-makes the protection load-bearing only behind a reverse proxy.
+Three secure-by-default flips landed in v0.4.16. Pre-0.4.16 deployments
+that relied on the previous lax defaults must update one or more env
+vars / CLI flags before upgrading.
 
-When enabling, set:
-
-- `MCP_AEMPS_ALLOWED_HOSTS=your-host.example.com,…`
-- `MCP_AEMPS_ALLOWED_ORIGINS=https://your-host.example.com,…`
-
-(Empty defaults route to a dev-friendly allow-list including
-`localhost`, `127.0.0.1`, and FastAPI TestClient's `testserver`.)
+- **Loopback bind by default.** `UVICORN_HOST` defaults to `127.0.0.1`
+  (was `0.0.0.0` until v0.4.15). The listener is no longer reachable
+  from the LAN unless you explicitly opt in. Docker / reverse-proxy
+  deployments use `mcp-aemps up --bind-all` (the shipped Dockerfile
+  already does); bare-metal deployments that need LAN reachability
+  set `UVICORN_HOST=0.0.0.0` or pass `--bind-all`.
+- **DNS rebinding protection on by default.**
+  `MCP_AEMPS_DNS_REBINDING_PROTECTION` defaults to `true` (was `false`
+  until v0.4.15). The default `allowed_hosts` list covers `localhost`,
+  `127.0.0.1`, `[::1]` and FastAPI TestClient's `testserver`, so dev /
+  test workflows keep working. Reverse-proxy deployments must extend
+  `MCP_AEMPS_ALLOWED_HOSTS=your-host.example.com,…` and optionally
+  `MCP_AEMPS_ALLOWED_ORIGINS=https://your-host.example.com,…`. Set the
+  protection env var to `false` only if you accept the residual risk
+  (read-only public data + OAuth audience binding bound the impact).
+- **`/internal/metrics` fail-closed when `METRICS_KEY` is unset.** The
+  pre-0.4.16 startup `WARNING` was routinely missed in noisy log
+  streams. The endpoint now returns `503 metrics disabled` until a key
+  is configured. Scrapers must send the matching `X-Metrics-Key`
+  header.
 
 ## Data handling
 
@@ -178,10 +190,12 @@ suggest.
 ## Hardening checklist for production deployments
 
 - [ ] Set `ALLOWED_ORIGINS` to your real frontends (never `*` in prod).
-- [ ] Set `METRICS_KEY` to gate `/internal/metrics`.
-- [ ] Enable `MCP_AEMPS_DNS_REBINDING_PROTECTION=true` and configure
-      `MCP_AEMPS_ALLOWED_HOSTS` / `_ORIGINS` for your reverse-proxy
-      hostname.
+- [ ] Set `METRICS_KEY` (required since v0.4.16 — endpoint is 503 until
+      configured).
+- [ ] If exposing behind a reverse proxy, configure
+      `MCP_AEMPS_ALLOWED_HOSTS` / `_ORIGINS` for your public hostname.
+      DNS rebinding protection is on by default since v0.4.16; without
+      these env vars the proxy's hostname is rejected.
 - [ ] Run behind a reverse proxy with TLS (nginx, Caddy, Traefik).
 - [ ] Provide `REDIS_URL` for distributed cache, rate limiting, and
       ETag store sharing across replicas.
@@ -190,9 +204,10 @@ suggest.
 - [ ] Set `LOG_LEVEL=INFO` (not DEBUG) and ship logs to a SIEM. The
       Claude Code hook recipes in the README work for this.
 - [ ] Use the Docker image with the non-root user (UID 10001).
-- [ ] Bind explicitly to a loopback or private interface when the
-      listener should not be reachable from untrusted networks
-      (`--host 127.0.0.1`).
+- [ ] Bind defaults to loopback (`127.0.0.1`) since v0.4.16. Use
+      `mcp-aemps up --bind-all` (or `UVICORN_HOST=0.0.0.0`) only when
+      the listener must be reachable from outside the host (Docker,
+      reverse-proxy on a different host).
 - [ ] Rotate `METRICS_KEY` and any OAuth client credentials on the
       schedule your compliance regime requires.
 - [ ] Set `MCP_AEMPS_SKIP_UPDATE_CHECK=1` in air-gapped deployments

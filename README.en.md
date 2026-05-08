@@ -160,9 +160,13 @@ All settings via environment variables:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `8765` | Server port (`mcp-aemps up --auto-port` finds free if busy) |
+| `UVICORN_HOST` | `127.0.0.1` | Bind interface. Loopback by default since v0.4.16 (was `0.0.0.0`). For Docker / reverse-proxy use `mcp-aemps up --bind-all` or `UVICORN_HOST=0.0.0.0`. |
 | `REDIS_URL` | — | Redis or Valkey connection (optional, enables distributed cache + rate limit) |
 | `ALLOWED_ORIGINS` | *(empty)* | CORS origins. Empty by default — mcp-aemps is meant for MCP clients (Claude / Codex / Cursor) that call from backend code or local IPC, not browsers. Only set this if you front mcp-aemps from a webapp. Do not use `*` in production. |
-| `METRICS_KEY` | — | If set, `/internal/metrics` requires the `X-Metrics-Key` header. Recommended in production. |
+| `METRICS_KEY` | — | **Required** since v0.4.16 to enable `/internal/metrics`. Without it, the endpoint returns `503 metrics disabled` (fail-closed). When set, requests must carry the `X-Metrics-Key` header. |
+| `MCP_AEMPS_DNS_REBINDING_PROTECTION` | `true` | `Host` / `Origin` header validation on `/mcp`. On by default since v0.4.16. Behind a reverse proxy, configure `MCP_AEMPS_ALLOWED_HOSTS` and `MCP_AEMPS_ALLOWED_ORIGINS` with your public hostname. |
+| `MCP_AEMPS_ALLOWED_HOSTS` | *(localhost / 127.0.0.1 / [::1] / testserver)* | `Host` header values allowed on `/mcp` when DNS rebinding protection is on. CSV. |
+| `MCP_AEMPS_ALLOWED_ORIGINS` | *(http://localhost / 127.0.0.1 / [::1])* | `Origin` header values allowed on `/mcp` when DNS rebinding protection is on. CSV. |
 | `LOG_LEVEL` | `INFO` | Logging level |
 | `LOG_RETENTION_DAYS` | `90` | Daily-rotated gzipped log retention |
 | `MAX_RESULTS` | `30` | Max items per page returned by list endpoints |
@@ -178,7 +182,7 @@ Ships with **lightweight in-process observability** — no external collector re
 - **Liveness** at `/health/live` — process is alive (always 200 if the event loop responds).
 - **Readiness** at `/health/ready` — cache backend reachable AND maestras warmup completed (returns 503 during startup). Wire this into Kubernetes `readinessProbe`.
 - **Combined snapshot** at `/health` — `{status, version, cache}` JSON (kept for backwards compatibility).
-- **In-process metrics** at `/internal/metrics` — `{requests_total, requests_by_path, status_codes, errors_5xx, uptime_seconds}` JSON. Set `METRICS_KEY` to require the `X-Metrics-Key` header.
+- **In-process metrics** at `/internal/metrics` — `{requests_total, requests_by_path, status_codes, errors_5xx, uptime_seconds}` JSON. Since v0.4.16 the endpoint is **fail-closed**: requires `METRICS_KEY` (returns `503 metrics disabled` if unset) and the `X-Metrics-Key` header on every request.
 - **Structured stdlib logging** with daily rotation + gzip retention.
 
 For OpenTelemetry tracing or Prometheus exposition, replace the metrics middleware via the factory's `extra_middleware` / `startup_hooks` extension points (see `app/factory.py`).

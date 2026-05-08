@@ -115,6 +115,36 @@ and MCP Registry submission (github-oidc) — no manual tokens involved.
 - **Optional Redis**: code must work without Redis. If you add a Redis-dependent feature, gate it behind `if settings.redis_url`.
 - **No PII logging**: CIMA returns medicine metadata only. Don't add anything that correlates queries to user identity.
 
+### Security-relevant code (auditor pointers)
+
+Public `SECURITY.md` keeps the threat model deliberately generic so it
+doesn't double as a target list for attackers. Contributors auditing or
+extending the security-critical paths need the exact pointers — they
+live here:
+
+- **JWT verification (OAuth 2.1 Resource-Server mode).** `app/auth.py`
+  `JWKSTokenVerifier.verify_token` (around `app/auth.py:90`). The
+  algorithm whitelist is **asymmetric-only**: `RS256`, `RS384`, `RS512`,
+  `ES256`, `ES384`. Symmetric algorithms (`HS256`/`HS384`/`HS512`) and
+  the `none` algorithm are explicitly rejected by omission — pyjwt's
+  `algorithms` arg is a hard whitelist. Required claims are enforced via
+  `options={"require": ["exp", "iat", "aud"]}`; audience is bound to
+  `OAUTH_AUDIENCE`; issuer is checked when `OAUTH_ISSUER` is set. JWKS
+  keys are fetched via `PyJWKClient` with `cache_keys=True` and a TTL
+  (`cache_ttl_seconds=3600`). When extending the whitelist (e.g. adding
+  `EdDSA`), keep the asymmetric-only invariant.
+- **Secret hygiene.** All credential-bearing fields use Pydantic's
+  `SecretStr`; `Settings.safe_dump` excludes them so logs / error paths
+  never serialise them by accident. Read with `.get_secret_value()` only
+  inside the verifier or transport-construction code.
+- **Network defaults.** `app/config.py`. Loopback bind by default
+  (`uvicorn_host="127.0.0.1"`); DNS rebinding protection on by default
+  (`mcp_aemps_dns_rebinding_protection=True`); metrics endpoint
+  fail-closed when `METRICS_KEY` is unset (`app/factory.py`
+  `/internal/metrics` handler returns 503). Treat any change to these
+  defaults as a breaking change and gate it behind a major / minor bump
+  per `CLAUDE.md`.
+
 ### Tests
 
 - New code must have tests in `tests/`.

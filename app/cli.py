@@ -45,7 +45,8 @@ console = Console()
 APP_IMPORT = "app.mcp_aemps_server:app"
 PID_FILE = state_dir() / "mcp_aemps.pid"
 
-DEFAULT_UVICORN_HOST = "0.0.0.0"
+DEFAULT_UVICORN_HOST = "127.0.0.1"
+BIND_ALL_HOST = "0.0.0.0"
 DEFAULT_ACCESS_HOST = DEFAULT_HOST
 
 cli = typer.Typer(add_completion=False, help="CLI del servidor MCP-AEMPS (AEMPS/CIMA)")
@@ -103,6 +104,14 @@ def main(ctx: typer.Context):
 @cli.command()
 def up(
     uvicorn_host: str = typer.Option(DEFAULT_UVICORN_HOST, help="Bind host"),
+    bind_all: bool = typer.Option(
+        False,
+        "--bind-all",
+        help=(
+            "Bind on all interfaces (0.0.0.0) instead of loopback. "
+            "Use for Docker / reverse-proxy deployments. Overrides --uvicorn-host."
+        ),
+    ),
     access_host: str = typer.Option(DEFAULT_ACCESS_HOST, help="Public host clients connect to"),
     port: int = typer.Option(DEFAULT_PORT, help=f"TCP port (default {DEFAULT_PORT})"),
     workers: int = typer.Option(1, help="Uvicorn worker count"),
@@ -115,6 +124,8 @@ def up(
     _banner()
     _ensure_state_dir()
 
+    if bind_all:
+        uvicorn_host = BIND_ALL_HOST
     actual_port = _resolve_port(port, auto=auto_port, bind_host=uvicorn_host)
     write_runtime(host=access_host, port=actual_port)
 
@@ -175,6 +186,11 @@ def up(
 @cli.command()
 def dev(
     uvicorn_host: str = typer.Option(DEFAULT_UVICORN_HOST, help="Bind host (dev)"),
+    bind_all: bool = typer.Option(
+        False,
+        "--bind-all",
+        help="Bind on all interfaces (0.0.0.0) instead of loopback. Overrides --uvicorn-host.",
+    ),
     access_host: str = typer.Option(DEFAULT_ACCESS_HOST, help="Public host"),
     port: int = typer.Option(DEFAULT_PORT, help=f"TCP port (default {DEFAULT_PORT})"),
     access_log: bool = typer.Option(True, "--access-log/--no-access-log"),
@@ -183,6 +199,8 @@ def dev(
     """Start the server with --reload for development."""
     _banner()
     _ensure_state_dir()
+    if bind_all:
+        uvicorn_host = BIND_ALL_HOST
     actual_port = _resolve_port(port, auto=auto_port, bind_host=uvicorn_host)
     write_runtime(host=access_host, port=actual_port)
     console.print("🔄  Modo desarrollo (autorecarga)…", style="yellow")

@@ -132,7 +132,13 @@ class Settings(BaseSettings):
         description="Required scopes (comma-separated env var)",
     )
 
-    uvicorn_host: str = Field("0.0.0.0", description="Uvicorn bind host")
+    # Secure-by-default since v0.4.16: bind to loopback only. The previous
+    # default ``0.0.0.0`` was a footgun on multi-tenant networks (any
+    # neighbour on the LAN could reach the listener; CIMA data is public
+    # but the principle is fail-closed). Docker / reverse-proxy deployments
+    # opt back into LAN exposure with ``mcp_aemps up --bind-all`` (CLI) or
+    # ``UVICORN_HOST=0.0.0.0`` (env).
+    uvicorn_host: str = Field("127.0.0.1", description="Uvicorn bind host")
     access_host: str = Field("localhost", description="Public host clients use")
     port: int = Field(8000, description="TCP port")
 
@@ -178,13 +184,22 @@ class Settings(BaseSettings):
     # so deployers can either disable it (CIMA data is public, the
     # attack vector is low-impact) or extend the host list to cover
     # their reverse-proxy hostname.
+    # Secure-by-default since v0.4.16: protection ON. The default
+    # ``allowed_hosts`` list (see ``app/stdio_server.py``) covers
+    # ``localhost``, ``127.0.0.1``, ``[::1]`` and FastAPI TestClient's
+    # synthetic ``testserver`` host, so dev / test workflows don't break.
+    # Reverse-proxy deployments must extend the host list via
+    # ``MCP_AEMPS_ALLOWED_HOSTS`` regardless — the flag flip just forces
+    # them to think about it instead of silently accepting any Host header.
     mcp_aemps_dns_rebinding_protection: bool = Field(
-        False,
+        True,
         description=(
             "Enable MCP transport DNS rebinding protection (Host/Origin "
-            "header validation on /mcp). Default off — set to true in "
-            "production deployments behind a reverse proxy and configure "
-            "MCP_AEMPS_ALLOWED_HOSTS / MCP_AEMPS_ALLOWED_ORIGINS."
+            "header validation on /mcp). Default on — reverse-proxy "
+            "deployments must extend MCP_AEMPS_ALLOWED_HOSTS / "
+            "MCP_AEMPS_ALLOWED_ORIGINS to whitelist their public hostname. "
+            "Set to false to disable (CIMA data is public so the residual "
+            "risk is low, but secure-by-default is the right posture)."
         ),
     )
     mcp_aemps_allowed_hosts: Annotated[List[str], NoDecode] = Field(
@@ -206,7 +221,11 @@ class Settings(BaseSettings):
 
     metrics_key: Optional[SecretStr] = Field(
         None,
-        description="If set, /internal/metrics requires a matching X-Metrics-Key header.",
+        description=(
+            "Required to enable /internal/metrics. When unset (default), "
+            "the endpoint returns 503 (fail-closed since v0.4.16). When "
+            "set, requests must carry a matching X-Metrics-Key header."
+        ),
     )
 
     @field_validator(

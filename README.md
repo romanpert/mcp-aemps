@@ -158,9 +158,13 @@ Todas las opciones se configuran vía variables de entorno:
 | Variable | Default | Descripción |
 |----------|---------|-------------|
 | `PORT` | `8765` | Puerto del servidor (`mcp-aemps up --auto-port` busca uno libre si está ocupado) |
+| `UVICORN_HOST` | `127.0.0.1` | Interfaz de bind. Loopback por defecto desde v0.4.16 (era `0.0.0.0`). Para Docker / reverse-proxy usa `mcp-aemps up --bind-all` o `UVICORN_HOST=0.0.0.0`. |
 | `REDIS_URL` | — | Conexión a Redis o Valkey (opcional, habilita cache + rate-limit distribuidos) |
 | `ALLOWED_ORIGINS` | *(vacío)* | Orígenes CORS. Vacío por defecto: el servidor está pensado para clientes MCP (Claude / Codex / Cursor) que llaman desde código backend o IPC local, no para navegadores. Solo configúralo si fronteas mcp-aemps desde una webapp. No usar `*` en producción. |
-| `METRICS_KEY` | — | Si se establece, `/internal/metrics` requiere la cabecera `X-Metrics-Key`. Recomendado en producción. |
+| `METRICS_KEY` | — | **Requerido** desde v0.4.16 para habilitar `/internal/metrics`. Sin esta variable, el endpoint devuelve `503 metrics disabled` (fail-closed). Cuando se establece, las peticiones deben llevar la cabecera `X-Metrics-Key`. |
+| `MCP_AEMPS_DNS_REBINDING_PROTECTION` | `true` | Validación de cabecera `Host` / `Origin` en `/mcp`. Activado por defecto desde v0.4.16. Detrás de un reverse-proxy, configura `MCP_AEMPS_ALLOWED_HOSTS` y `MCP_AEMPS_ALLOWED_ORIGINS` con tu hostname público. |
+| `MCP_AEMPS_ALLOWED_HOSTS` | *(localhost / 127.0.0.1 / [::1] / testserver)* | Cabeceras `Host` permitidas en `/mcp` cuando la protección DNS rebinding está activa. CSV. |
+| `MCP_AEMPS_ALLOWED_ORIGINS` | *(http://localhost / 127.0.0.1 / [::1])* | Cabeceras `Origin` permitidas en `/mcp` cuando la protección DNS rebinding está activa. CSV. |
 | `LOG_LEVEL` | `INFO` | Nivel de logging |
 | `LOG_RETENTION_DAYS` | `90` | Retención de logs rotados diariamente + gzipped |
 | `MAX_RESULTS` | `30` | Máximo de items por página en endpoints de listado |
@@ -176,7 +180,7 @@ Incluye **observabilidad in-process ligera** — sin requerir collector externo:
 - **Liveness** en `/health/live` — proceso vivo (siempre 200 si el event loop responde).
 - **Readiness** en `/health/ready` — backend de cache alcanzable Y warmup de maestras completado (devuelve 503 durante el arranque). Conectar a `readinessProbe` de Kubernetes.
 - **Snapshot combinado** en `/health` — JSON `{status, version, cache}` (mantenido por compatibilidad).
-- **Métricas in-process** en `/internal/metrics` — JSON `{requests_total, requests_by_path, status_codes, errors_5xx, uptime_seconds}`. Establece `METRICS_KEY` para requerir la cabecera `X-Metrics-Key`.
+- **Métricas in-process** en `/internal/metrics` — JSON `{requests_total, requests_by_path, status_codes, errors_5xx, uptime_seconds}`. Desde v0.4.16 el endpoint es **fail-closed**: requiere `METRICS_KEY` (devuelve `503 metrics disabled` si no está configurado) y la cabecera `X-Metrics-Key` en cada petición.
 - **Logging estructurado stdlib** con rotación diaria + retención gzip.
 
 Para tracing OpenTelemetry o exposición Prometheus, reemplaza el middleware de métricas vía los puntos de extensión `extra_middleware` / `startup_hooks` del factory (ver `app/factory.py`).

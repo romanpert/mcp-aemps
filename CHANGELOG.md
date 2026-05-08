@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.16] — 2026-05-08
+
+Pre-1.0 hardening backlog landed as a single PATCH (per maintainer
+direction) rather than the v0.5.0 bundle the roadmap originally
+scoped. Three of the four items are **secure-by-default flips that
+break existing deployments** which relied on the previous lax
+defaults — read each item before upgrading.
+
+### Security
+
+- **BREAKING — `uvicorn_host` default `0.0.0.0` → `127.0.0.1`
+  (loopback only).** Pre-0.4.16 the server bound to all interfaces
+  by default, exposing the listener to anyone on the same LAN /
+  shared Docker network. CIMA data is public so the residual risk
+  was low, but secure-by-default is the right posture. Migration:
+  add `--bind-all` (CLI) — Docker / reverse-proxy use cases — or
+  set `UVICORN_HOST=0.0.0.0` (env). The shipped `Dockerfile` and
+  `docker-compose.yml` stack already pass `--bind-all`, so
+  containerised deployments are unaffected. Bare-metal / systemd
+  deployments that previously relied on the wildcard bind must
+  add the flag explicitly.
+- **BREAKING — `MCP_AEMPS_DNS_REBINDING_PROTECTION` default
+  `false` → `true`.** Pre-0.4.16 the FastMCP transport accepted
+  any `Host` / `Origin` header on `/mcp` by default. The default
+  `allowed_hosts` list covers `localhost`, `127.0.0.1`, `[::1]`
+  and FastAPI TestClient's `testserver` synthetic host, so dev /
+  test workflows are unaffected. Reverse-proxy deployments must
+  extend `MCP_AEMPS_ALLOWED_HOSTS` (and optionally
+  `MCP_AEMPS_ALLOWED_ORIGINS`) to whitelist their public hostname,
+  or set `MCP_AEMPS_DNS_REBINDING_PROTECTION=false` to opt out
+  (not recommended).
+- **BREAKING — `/internal/metrics` is fail-closed when
+  `METRICS_KEY` is unset.** Pre-0.4.16 the endpoint logged a
+  startup `WARNING` and stayed publicly readable. The warning was
+  routinely missed in noisy log streams. Now: if `METRICS_KEY` is
+  unset, the endpoint returns `503 metrics disabled: METRICS_KEY
+  is not configured`. Migration: set `METRICS_KEY` in any
+  deployment that scrapes `/internal/metrics`; Prometheus must
+  send the matching `X-Metrics-Key` header. Scrapers that
+  previously hit the endpoint anonymously will receive 503 until
+  reconfigured — that is intentional.
+- **JWT algorithm whitelist documented in `CONTRIBUTING.md` for
+  contributors auditing the verifier.** Public `SECURITY.md` keeps
+  the threat model generic ("asymmetric-only, no `HS256`, no
+  `none`") without listing the exact algorithm names + file:line
+  of the `jwt.decode` call. Auditors / forks need that detail —
+  it now lives in `CONTRIBUTING.md` § "Security-relevant code
+  (auditor pointers)".
+
+### Added
+
+- **`mcp-aemps up --bind-all` and `mcp-aemps dev --bind-all`**
+  flags. Convenience over `--uvicorn-host 0.0.0.0` for the Docker
+  / reverse-proxy use case. Overrides `--uvicorn-host` when both
+  are passed.
+
 ## [0.4.15] — 2026-05-07
 
 ### Security

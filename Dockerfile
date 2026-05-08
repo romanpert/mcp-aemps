@@ -68,8 +68,10 @@ EXPOSE 8765
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=5 \
   CMD curl -sf http://127.0.0.1:${PORT}/health || exit 1
 
-# Default: run server in foreground. Override with `docker run ... mcp-aemps <cmd>`
-CMD ["sh", "-c", "mcp-aemps up --uvicorn-host 0.0.0.0 --port ${PORT} --no-auto-port"]
+# Default: run server in foreground. Override with `docker run ... mcp-aemps <cmd>`.
+# ``--bind-all`` flips the (loopback-only since v0.4.16) bind back to 0.0.0.0
+# so the container is reachable from outside the container network namespace.
+CMD ["sh", "-c", "mcp-aemps up --bind-all --port ${PORT} --no-auto-port"]
 
 # ============================================================================
 # OCI labels (image metadata for ghcr.io / docker hub)

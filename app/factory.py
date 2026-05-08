@@ -211,11 +211,23 @@ def create_app(
 
     @app.get("/internal/metrics", include_in_schema=False, dependencies=[limit_local])
     async def metrics(x_metrics_key: str | None = Header(default=None)):  # noqa: D401
+        # Fail-closed since v0.4.16: an unset METRICS_KEY disables the
+        # endpoint entirely (returns 503) instead of leaving it publicly
+        # readable behind a startup WARNING. The pre-0.4.16 warning was
+        # routinely missed in noisy log streams; a 503 forces the operator
+        # to read SECURITY.md and either set the key or stop scraping.
         configured = settings.metrics_key
-        if configured is not None:
-            expected = configured.get_secret_value() if isinstance(configured, SecretStr) else str(configured)
-            if not x_metrics_key or x_metrics_key != expected:
-                raise HTTPException(status_code=401, detail="Invalid or missing X-Metrics-Key.")
+        if configured is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "metrics disabled: METRICS_KEY is not configured. "
+                    "Set METRICS_KEY to enable /internal/metrics."
+                ),
+            )
+        expected = configured.get_secret_value() if isinstance(configured, SecretStr) else str(configured)
+        if not x_metrics_key or x_metrics_key != expected:
+            raise HTTPException(status_code=401, detail="Invalid or missing X-Metrics-Key.")
         return JSONResponse(METRICS.snapshot())
 
     app.include_router(medicamentos_router)
@@ -234,9 +246,12 @@ def create_app(
         app.state.mcp_server = mcp_server
 
     if settings.metrics_key is None:
-        logger.warning(
-            "METRICS_KEY is not set — /internal/metrics is publicly readable. "
-            "Set METRICS_KEY in production deployments."
+        # Fail-closed: the endpoint itself returns 503 when METRICS_KEY is
+        # unset (see /internal/metrics handler above). Logged at INFO so
+        # operators understand why their scrapers get 503, without the
+        # alarm-fatigue of a WARNING that pre-0.4.16 was ignored.
+        logger.info(
+            "METRICS_KEY not set — /internal/metrics is disabled (503). Set METRICS_KEY to enable scraping."
         )
 
     return app
