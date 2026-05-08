@@ -5,8 +5,8 @@
 <h1 align="center">mcp-aemps</h1>
 
 <p align="center">
-  <strong>El primer servidor MCP open-source y regulatorio-compliant para la industria farmacéutica.</strong><br/>
-  Acceso en tiempo real al registro AEMPS/CIMA — más de 20.000 medicamentos autorizados en España, alertas de seguridad, problemas de suministro, fichas técnicas, prospectos — expuesto como herramientas MCP estructuradas para cualquier asistente de IA.
+  <strong>Datos farmacéuticos oficiales, listos para tu agente.</strong><br/>
+  El primer servidor MCP open-source para la industria farmacéutica. <strong>20.000+ medicamentos AEMPS</strong>, en tiempo real, regulator-grade.
 </p>
 
 <p align="center">
@@ -28,309 +28,197 @@
 
 ---
 
-## Qué hace
+## Lo que tu agente puede hacer
 
-`mcp-aemps` envuelve la **API REST CIMA de la AEMPS** como un servidor MCP completo. Conecta Claude, GPT-4o, Gemini — o cualquier agente compatible con MCP — al registro oficial de medicamentos español. Consulta autorizaciones, fichas técnicas, notas de farmacovigilancia, problemas de suministro, equivalentes clínicos y más, en tiempo real.
+Conecta tu asistente — Claude, ChatGPT, Gemini, Cursor, Continue, Zed, Junie — al registro oficial AEMPS / CIMA. Sin scrapers. Sin hardcoded snapshots. Sin patient data. Cada respuesta cita endpoint REST oficial y fecha de consulta.
 
-**Fuente de datos:** [CIMA (AEMPS)](https://cima.aemps.es) — API pública, sin PII, sin autenticación requerida.
-**Postura de compliance:** Proxy read-only. Audit trail por petición. Sin procesamiento de datos de pacientes.
+> **Tú:** «¿Qué efectos adversos graves aparecen en la ficha técnica de **HUMIRA 40 mg**?»
+> **Tu agente** consulta `obtener_medicamento` → `doc_contenido` (sección 4.8 de la FT) → devuelve estructurado, con timestamp y fuente AEMPS.
 
----
+> **Tú:** «Lista los problemas de suministro vigentes para **omeprazol 20 mg cápsulas**.»
+> **Tu agente** llama `problemas_suministro_dcpf` → devuelve los lotes afectados, fechas previstas de retorno y alternativas terapéuticas equivalentes.
 
-## Instalación
+> **Tú:** «¿Qué notas de farmacovigilancia ha publicado AEMPS sobre **inhibidores SGLT2** en los últimos 6 meses?»
+> **Tu agente** filtra `listar_notas` + recupera `obtener_notas` → resumen accionable con enlaces oficiales.
 
-```bash
-# pip
-pip install mcp-aemps
+> **Tú:** «Dame un equivalente clínico (mismo VMP) para **simvastatina 20 mg comprimidos** sin lactosa.»
+> **Tu agente** cruza `buscar_vmpp` + `buscar_en_ficha_tecnica("lactosa")` → propone alternativas con autorización AEMPS vigente y excipientes confirmados.
 
-# zero-install (recomendado para clientes CLI)
-uvx mcp-aemps up
-pipx run mcp-aemps up
+> **Tú:** «¿Qué cambia entre la FT actual de **Eliquis** y la versión publicada hace 90 días?»
+> **Tu agente** invoca el prompt curado `monitorizar_cambios_cartera` → diff por sección sobre la documentación oficial.
 
-# Docker (multi-arch: linux/amd64, linux/arm64) — mínimo 0.1.6
-docker run -p 8765:8765 ghcr.io/romanpert/mcp-aemps:latest
-
-# Docker Compose
-docker compose up -d
-```
+10 prompts curados más, cubriendo farmacia comunitaria, hospitalaria, industria y counseling al paciente — listos para invocar como slash-commands en tu cliente MCP.
 
 ---
 
-## Configuración del cliente en un solo comando
-
-Tras `pip install mcp-aemps`, registra el servidor en tu cliente MCP con **un único comando** — sin editar JSON manualmente.
+## Instalación en 30 segundos
 
 ```bash
-# Todos los clientes detectados a la vez
-mcp-aemps install
-
-# O elige uno
-mcp-aemps install claude-desktop   # stdio por defecto (uvx auto-launch); HTTP via mcp-remote opcional
-mcp-aemps install claude-code      # usa `claude mcp add` cuando está disponible
-mcp-aemps install codex
-mcp-aemps install vscode           # escribe mcp.servers en settings.json (Copilot Chat MCP)
-mcp-aemps install cursor           # escribe ~/.cursor/mcp.json
-mcp-aemps install windsurf         # escribe ~/.codeium/windsurf/mcp_config.json
-mcp-aemps install zed              # escribe context_servers en Zed settings.json
-mcp-aemps install continue         # escribe mcpServers en ~/.continue/config.yaml
-mcp-aemps install jetbrains        # escribe ~/.junie/mcp.json (JetBrains Junie)
-
-# URL o nombre de servidor personalizado
-mcp-aemps install --url http://my-host:9000/mcp --name aemps
+# Una línea — cualquier cliente MCP detectado se configura automáticamente.
+pip install mcp-aemps && mcp-aemps install
 ```
 
-Para desinstalar:
+¿Sin Python en la máquina? Hay tres alternativas equivalentes:
 
 ```bash
-mcp-aemps uninstall                  # quitar de todos
-mcp-aemps uninstall claude-desktop   # solo un cliente
+uvx mcp-aemps install                                                   # zero-install vía uv (recomendado)
+docker run -p 8765:8765 ghcr.io/romanpert/mcp-aemps:latest              # contenedor multi-arch
+pipx run mcp-aemps install                                              # pipx
 ```
 
-**Propiedades** — los instaladores son *idempotentes* (se pueden re-ejecutar con seguridad), *aditivos* (preservan tus otras entradas), *atómicos* (la escritura se completa entera o no se aplica) y *port-aware* (leen el puerto real al que se ha bindeado `mcp-aemps up`, así que puedes cambiar de puerto sin re-instalar).
+Reinicia tu cliente MCP. El servidor aparece como `mcp-aemps`. Listo.
 
-**Rutas de configuración por SO:**
-
-| Cliente | macOS | Windows | Linux |
-|---|---|---|---|
-| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` | `%APPDATA%\Claude\claude_desktop_config.json` | `~/.config/Claude/claude_desktop_config.json` |
-| Claude Code | `claude mcp add` (preferido) → fallback `~/.claude.json` | igual | igual |
-| Codex | `~/.codex/config.toml` | `%USERPROFILE%\.codex\config.toml` | `~/.codex/config.toml` |
-| VS Code | `~/Library/Application Support/Code/User/settings.json` | `%APPDATA%\Code\User\settings.json` | `~/.config/Code/User/settings.json` |
-| Cursor | `~/.cursor/mcp.json` | igual | igual |
-| Windsurf | `~/.codeium/windsurf/mcp_config.json` | igual | igual |
-| Zed | `~/.config/zed/settings.json` | `%APPDATA%\Zed\settings.json` | `~/.config/zed/settings.json` |
-| Continue.dev | `~/.continue/config.yaml` | igual | igual |
-| JetBrains Junie | `~/.junie/mcp.json` | igual | igual |
-
-Tras instalar, **arranca el servidor** (puerto por defecto: **`8765`** — elegido para evitar colisiones con los típicos `8000`/`5000`/`3000`):
-
-```bash
-mcp-aemps up           # foreground
-mcp-aemps up --daemon  # background
-mcp-aemps up --port 9000  # puerto explícito; auto-fallback habilitado por defecto
-```
-
-Después reinicia tu cliente. `mcp-aemps` aparece como un servidor MCP disponible.
+> 💡 **Sin servidor que mantener.** Por defecto los instaladores configuran el cliente para lanzar `uvx mcp-aemps@latest stdio` bajo demanda — el agente arranca el servidor cuando lo necesita y lo apaga cuando termina. Para despliegues compartidos / multi-tenant ver [Despliegue](#despliegue).
 
 ---
 
-## Herramientas MCP — Endpoints oficiales CIMA
+## Compatibilidad — un comando, 11 clientes
 
-Todas las herramientas mapean 1:1 a endpoints REST CIMA oficialmente documentados.
+| Cliente | Comando | Notas |
+|---|---|---|
+| **Claude Desktop** | `mcp-aemps install claude-desktop` | Anthropic — stdio por defecto, HTTP via `mcp-remote` opcional |
+| **Claude Code** | `mcp-aemps install claude-code` | Anthropic CLI — usa `claude mcp add` cuando está disponible |
+| **Codex CLI** | `mcp-aemps install codex` | OpenAI — `~/.codex/config.toml` |
+| **Gemini CLI** | `mcp-aemps install gemini` | Google — `~/.gemini/settings.json`, MCP nativo (v0.4.17+) |
+| **VS Code** | `mcp-aemps install vscode` | GitHub Copilot Chat MCP — `mcp.json` dedicado (post-2025) |
+| **Cursor** | `mcp-aemps install cursor` | `~/.cursor/mcp.json` |
+| **Windsurf** | `mcp-aemps install windsurf` | Codeium — `~/.codeium/windsurf/mcp_config.json` |
+| **Zed** | `mcp-aemps install zed` | `context_servers` en `settings.json` |
+| **Continue.dev** | `mcp-aemps install continue` | Extensión VS Code / JetBrains — YAML |
+| **JetBrains Junie** | `mcp-aemps install jetbrains` | `~/.junie/mcp.json` |
+| **Antigravity** | `mcp-aemps install antigravity` | Google — IDE agente |
+
+Los instaladores son **idempotentes** (re-ejecuta sin miedo), **atómicos** (la escritura se completa entera o no se aplica), **additive** (preservan tus otras entradas), **port-aware** (leen el puerto real bound por `mcp-aemps up`), y **purgan automáticamente aliases legacy** (`aemps-cima`, etc.) para limpiar instalaciones de versiones antiguas. `mcp-aemps install` (sin subcomando) configura todos los detectados a la vez.
+
+---
+
+## Por qué mcp-aemps
+
+**🏛️ Regulator-grade.** Cada respuesta cita endpoint CIMA REST oficialmente documentado + timestamp. Audit trail por petición vía logs JSON estructurados (alineado con EU GMP Annex 11). Sin alucinación, sin datos derivados — solo el registro AEMPS publicado, expuesto tal cual.
+
+**🔒 Read-only por construcción.** Proxy fino sobre la API pública AEMPS. Cero escrituras. Cero PII procesada. Cero clinical decision support — esto **NO es un dispositivo médico** (MDR 2017/745 no aplica). Detalles del threat model en [SECURITY.md](SECURITY.md).
+
+**🌐 Estándar abierto.** Apache-2.0. Listado en [registry.modelcontextprotocol.io](https://registry.modelcontextprotocol.io). Implementación de referencia para servidores MCP en sectores regulados — quien quiera mirror oficial de su propio NCA (EMA, AIFA, Swissmedic, …) tiene aquí el blueprint.
+
+---
+
+## Catálogo
+
+<details>
+<summary><strong>21 herramientas MCP</strong> — todas mapean 1:1 a endpoints CIMA REST oficiales</summary>
 
 | Herramienta | Endpoint CIMA | Descripción |
 |------|--------------|-------------|
 | `obtener_medicamento` | `GET /medicamento` | Ficha completa por CN o nregistro |
 | `buscar_medicamentos` | `GET /medicamentos` | Búsqueda paginada con 20+ filtros |
-| `buscar_en_ficha_tecnica` | `POST /buscarEnFichaTecnica` | Búsqueda full-text dentro de fichas técnicas |
-| `listar_presentaciones` | `GET /presentaciones` | Listado de presentaciones con filtros |
-| `obtener_presentacion` | `GET /presentacion/:cn` | Detalle de presentación por Código Nacional |
+| `buscar_en_ficha_tecnica` | `POST /buscarEnFichaTecnica` | Full-text dentro de fichas técnicas |
+| `listar_presentaciones` | `GET /presentaciones` | Listado con filtros |
+| `obtener_presentacion` | `GET /presentacion/:cn` | Detalle por Código Nacional |
 | `buscar_vmpp` | `GET /vmpp` | Equivalentes clínicos (VMP/VMPP) |
-| `consultar_maestras` | `GET /maestras` | Catálogos maestros: ATC, principios activos, formas, laboratorios |
+| `consultar_maestras` | `GET /maestras` | ATC, principios activos, formas, laboratorios |
 | `registro_cambios` | `GET\|POST /registroCambios` | Histórico de altas / bajas / modificaciones |
-| `problemas_suministro` | `GET /psuministro` + `GET /psuministro/v2/cn/:cn` | Problemas de suministro — listado global o por Código Nacional |
-| `problemas_suministro_dcp` | `GET /psuministro/v2/dcp/:dcp` | Problemas de suministro por DCP (descripción clínica) |
-| `problemas_suministro_dcpf` | `GET /psuministro/v2/dcpf/:dcpf` | Problemas de suministro por DCPF (con forma farmacéutica) |
+| `problemas_suministro` | `GET /psuministro` + `GET /psuministro/v2/cn/:cn` | Listado global o por Código Nacional |
+| `problemas_suministro_dcp` | `GET /psuministro/v2/dcp/:dcp` | Por DCP (descripción clínica) |
+| `problemas_suministro_dcpf` | `GET /psuministro/v2/dcpf/:dcpf` | Por DCPF (con forma farmacéutica) |
 | `listar_notas` / `obtener_notas` | `GET /notas/:nregistro` | Notas de seguridad |
-| `listar_materiales` / `obtener_materiales` | `GET /materiales/:nregistro` | Materiales informativos de seguridad |
-| `doc_secciones` | `GET /docSegmentado/secciones/:tipo` | Metadatos de secciones de FT / prospecto |
-| `doc_contenido` | `GET /docSegmentado/contenido/:tipo` | Contenido de sección (JSON / HTML / texto plano) |
-| `html_ficha_tecnica` | `GET /dochtml/ft/:nregistro/:file` | HTML completo de la ficha técnica |
+| `listar_materiales` / `obtener_materiales` | `GET /materiales/:nregistro` | Materiales informativos |
+| `doc_secciones` | `GET /docSegmentado/secciones/:tipo` | Metadatos de secciones |
+| `doc_contenido` | `GET /docSegmentado/contenido/:tipo` | Contenido (JSON / HTML / texto) |
+| `html_ficha_tecnica` | `GET /dochtml/ft/:nregistro/:file` | HTML completo de la FT |
 | `html_prospecto` | `GET /dochtml/p/:nregistro/:file` | HTML completo del prospecto |
 
-Los problemas de suministro implementan **resolución dual-channel**: v2 por CN (enriquecida: estado de autorización, flag de comercialización) con fallback automático a v1 por compatibilidad.
+Todas las tools llevan [anotaciones MCP](https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations/) — `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, `openWorldHint: true` — para que clientes spec-compliant no pidan confirmación por consulta.
 
----
+</details>
 
-## Ciclo de vida de los datos
+<details>
+<summary><strong>11 recursos curados</strong> bajo el esquema URI <code>cima://</code> — cacheables, sin coste de tokens</summary>
 
-- **Sin ficheros locales requeridos.** Todos los datos se obtienen de la API CIMA bajo demanda.
-- **Cache Redis** (opcional): warm-up de catálogos maestros al arranque, refresco automático cada 24h sin reiniciar la aplicación.
-- **Resolución CN → nregistro** vía `GET /presentacion/:cn` (siempre actual, sin datos locales obsoletos).
-- Fallback elegante a cache en memoria cuando Redis no está disponible.
+**Recursos estáticos:**
+
+| URI | Contenido |
+|---|---|
+| `cima://maestras/atc` | Árbol completo de códigos ATC |
+| `cima://maestras/principios-activos` | Listado completo |
+| `cima://maestras/laboratorios` | Laboratorios titulares de autorización |
+| `cima://maestras/formas-farmaceuticas` | Comprimido, inyectable, … |
+| `cima://maestras/vias-administracion` | Oral, IV, tópica, … |
+
+**Templates:**
+
+| URI template | Contenido |
+|---|---|
+| `cima://maestras/atc/{codigo}` | Lookup ATC (p.ej. C09AA02 → Enalapril) |
+| `cima://maestras/principios-activos/{id}` | Lookup principio activo |
+| `cima://docs/ficha-tecnica/{nregistro}` | HTML completo |
+| `cima://docs/ficha-tecnica/{nregistro}/{seccion}` | Sección concreta (4.1, 4.8, 5.1, …) |
+| `cima://docs/prospecto/{nregistro}` | HTML completo |
+| `cima://docs/prospecto/{nregistro}/{seccion}` | Sección concreta (1, 2, 3, 4, 5, 6) |
+
+</details>
+
+<details>
+<summary><strong>10 prompts MCP curados</strong> — workflows profesionales y de paciente listos para invocar</summary>
+
+| Prompt | Audiencia | Caso de uso |
+|---|---|---|
+| `identificar_cn` | Farmacia comunitaria | Tarjeta resumen one-screen a partir de un Código Nacional |
+| `equivalencias_genericas` | Farmacia comunitaria | Sustitución durante desabastecimiento |
+| `vigilancia_paciente` | Farmacia hospitalaria | Notas de seguridad activas para una cartera de medicación |
+| `comparar_fichas_tecnicas` | Hospital + industria | Tabla wide-format comparando 2-5 medicamentos sección a sección |
+| `auditar_cartera_laboratorio` | Industria | Snapshot regulatorio completo de un laboratorio |
+| `monitorizar_cambios_cartera` | Regulatory affairs | Diff de altas / bajas / modificaciones sobre una lista de productos |
+| `informe_posicionamiento_terapeutico` | Hospital + industria | IPE/IPT + indicación autorizada + mecanismo |
+| `material_visual_paciente` | Counseling | Fotos, vídeos, material informativo segregado por audiencia |
+| `info_medicamento_para_no_sanitarios` | Público general | Resumen llano sin jerga |
+| `comprobar_interaccion_principios_activos` | Hospital + industria | Búsqueda textual sobre la sección 4.5 (Interacciones) |
+
+Los prompts dirigidos a pacientes cierran siempre con un disclaimer "no es consejo médico" — cubierto por test (`tests/test_prompts.py`); su eliminación rompe CI.
+
+</details>
 
 ---
 
 ## Configuración
 
-Todas las opciones se configuran vía variables de entorno:
+Cero variables requeridas — el servidor arranca con defaults sensatos. Las opciones más usadas:
 
-| Variable | Default | Descripción |
-|----------|---------|-------------|
-| `PORT` | `8765` | Puerto del servidor (`mcp-aemps up --auto-port` busca uno libre si está ocupado) |
-| `UVICORN_HOST` | `127.0.0.1` | Interfaz de bind. Loopback por defecto desde v0.4.16 (era `0.0.0.0`). Para Docker / reverse-proxy usa `mcp-aemps up --bind-all` o `UVICORN_HOST=0.0.0.0`. |
-| `REDIS_URL` | — | Conexión a Redis o Valkey (opcional, habilita cache + rate-limit distribuidos) |
-| `ALLOWED_ORIGINS` | *(vacío)* | Orígenes CORS. Vacío por defecto: el servidor está pensado para clientes MCP (Claude / Codex / Cursor) que llaman desde código backend o IPC local, no para navegadores. Solo configúralo si fronteas mcp-aemps desde una webapp. No usar `*` en producción. |
-| `METRICS_KEY` | — | **Requerido** desde v0.4.16 para habilitar `/internal/metrics`. Sin esta variable, el endpoint devuelve `503 metrics disabled` (fail-closed). Cuando se establece, las peticiones deben llevar la cabecera `X-Metrics-Key`. |
-| `MCP_AEMPS_DNS_REBINDING_PROTECTION` | `true` | Validación de cabecera `Host` / `Origin` en `/mcp`. Activado por defecto desde v0.4.16. Detrás de un reverse-proxy, configura `MCP_AEMPS_ALLOWED_HOSTS` y `MCP_AEMPS_ALLOWED_ORIGINS` con tu hostname público. |
-| `MCP_AEMPS_ALLOWED_HOSTS` | *(localhost / 127.0.0.1 / [::1] / testserver)* | Cabeceras `Host` permitidas en `/mcp` cuando la protección DNS rebinding está activa. CSV. |
-| `MCP_AEMPS_ALLOWED_ORIGINS` | *(http://localhost / 127.0.0.1 / [::1])* | Cabeceras `Origin` permitidas en `/mcp` cuando la protección DNS rebinding está activa. CSV. |
-| `LOG_LEVEL` | `INFO` | Nivel de logging |
-| `LOG_RETENTION_DAYS` | `90` | Retención de logs rotados diariamente + gzipped |
-| `MAX_RESULTS` | `30` | Máximo de items por página en endpoints de listado |
-| `MCP_AEMPS_LOCALE` | auto | Idioma de strings LLM-facing: `es` o `en`. Auto-detectado de `$LANG`/`$LC_ALL` si no se establece (default `es`). |
-| `OAUTH_ENABLED` | `false` | Activa modo OAuth 2.1 Resource-Server. Ver sección OAuth. |
-
----
-
-## Observabilidad
-
-Incluye **observabilidad in-process ligera** — sin requerir collector externo:
-
-- **Liveness** en `/health/live` — proceso vivo (siempre 200 si el event loop responde).
-- **Readiness** en `/health/ready` — backend de cache alcanzable Y warmup de maestras completado (devuelve 503 durante el arranque). Conectar a `readinessProbe` de Kubernetes.
-- **Snapshot combinado** en `/health` — JSON `{status, version, cache}` (mantenido por compatibilidad).
-- **Métricas in-process** en `/internal/metrics` — JSON `{requests_total, requests_by_path, status_codes, errors_5xx, uptime_seconds}`. Desde v0.4.16 el endpoint es **fail-closed**: requiere `METRICS_KEY` (devuelve `503 metrics disabled` si no está configurado) y la cabecera `X-Metrics-Key` en cada petición.
-- **Logging estructurado stdlib** con rotación diaria + retención gzip.
-
-Para tracing OpenTelemetry o exposición Prometheus, reemplaza el middleware de métricas vía los puntos de extensión `extra_middleware` / `startup_hooks` del factory (ver `app/factory.py`).
-
----
-
-## Idioma (i18n)
-
-Las strings LLM-facing (descripciones de tools, system prompt, descripciones y bodies de prompts) se entregan en **español (default)** e **inglés**. Cambia con la variable `MCP_AEMPS_LOCALE`:
-
-```bash
-# Default — auto-detectado del SO; sin variable → es
-uvx mcp-aemps stdio
-
-# Inglés explícito (siempre gana sobre el sniff del SO)
-MCP_AEMPS_LOCALE=en uvx mcp-aemps stdio
-```
-
-**Auto-detección del idioma del sistema operativo** (`$LC_ALL` / `$LANG` / `$LANGUAGE`): sistemas en inglés reciben `en`, todo lo demás (incluyendo locale POSIX `C` y locales no reconocidos) cae a `es` porque la fuente de datos CIMA es española. Una `MCP_AEMPS_LOCALE` explícita siempre gana sobre la auto-detección.
-
-Desde v0.2.9 el catálogo **completo** de prompts (descripciones + bodies + disclaimer dirigido a pacientes) se entrega en ambos idiomas. Ambos locales registran los mismos 10 nombres de prompt con las mismas signaturas — los clientes que hardcodean nombres siguen funcionando al cambiar de idioma.
-
----
-
-## OAuth 2.1 (opt-in)
-
-mcp-aemps es **público por defecto** porque CIMA es público. Para despliegues SaaS multi-tenant o cualquier setup donde necesites gating de acceso, el servidor se puede activar en modo **OAuth 2.1 Resource-Server** con cinco variables de entorno:
-
-```bash
-export OAUTH_ENABLED=true
-export OAUTH_ISSUER=https://auth.example.com
-export OAUTH_JWKS_URL=https://auth.example.com/.well-known/jwks.json
-export OAUTH_AUDIENCE=https://mcp-aemps.example.com/mcp
-export OAUTH_REQUIRED_SCOPES=mcp:read
-```
-
-Cuando está habilitado:
-
-* Cada llamada a tool MCP sobre HTTP en `/mcp` requiere un JWT Bearer válido firmado por el Authorization Server configurado.
-* El documento PRM se publica en `/.well-known/oauth-protected-resource` (RFC 9728), de modo que cualquier cliente MCP spec-compliant puede descubrir el AS vía Dynamic Client Registration (RFC 7591).
-* stdio no se ve afectado — el acceso process-local se controla por permisos de SO, no por OAuth.
-
-**Sin Authorization Server embebido.** Apunta `OAUTH_ISSUER` a cualquier IdP existente — Auth0, Stytch, Cloudflare Workers OAuth Provider, Hydra, Keycloak, etc. mcp-aemps es stateless: verifica tokens, nunca los emite.
-
-Validado end-to-end en v0.2.10: POST `/mcp` sin token devuelve 401 con cabecera `WWW-Authenticate: Bearer error="invalid_token", resource_metadata="<URL del PRM>"` (RFC 6750 §3 + RFC 9728).
-
----
-
-## Anotaciones de Tools
-
-Cada herramienta CIMA se entrega con las [anotaciones MCP](https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations/) que los clientes spec-compliant (Claude Desktop, ChatGPT Dev Mode, Cursor, Continue, Zed, JetBrains Junie, …) usan para su UI de auto-aprobación:
-
-| Hint              | Valor | Razón                                                       |
-|-------------------|-------|-------------------------------------------------------------|
-| `readOnlyHint`    | true  | El servidor es un proxy fino — no hay escrituras upstream.  |
-| `destructiveHint` | false | Sin mutaciones del entorno, nunca.                          |
-| `idempotentHint`  | true  | Mismos args en el mismo instante → mismo payload.           |
-| `openWorldHint`   | true  | Las tools golpean la API HTTP externa de CIMA.              |
-
-Esto hace que los clientes que respetan la spec no pidan confirmación en cada query CIMA — solo gatean llamadas donde las anotaciones lo justifican. Para Claude Code en concreto, ver más abajo cómo construir tus propias confirmation gates independientemente de las anotaciones.
-
----
-
-## Recursos MCP curados
-
-mcp-aemps expone **5 recursos estáticos + 6 templates** bajo el esquema URI `cima://`. Los recursos son URIs read-only que los clientes MCP pueden **streamear** y **cachear** sin pagar el coste en tokens de una llamada a tool — la fuente dominante de gasto de tokens en sesiones interactivas.
-
-### Recursos estáticos (auto-descubribles vía `resources/list`)
-
-| URI | MIME | Contenido |
+| Variable | Default | Para qué |
 |---|---|---|
-| `cima://maestras/atc` | `application/json` | Árbol completo de códigos ATC |
-| `cima://maestras/principios-activos` | `application/json` | Listado completo de principios activos |
-| `cima://maestras/laboratorios` | `application/json` | Laboratorios titulares de autorización AEMPS |
-| `cima://maestras/formas-farmaceuticas` | `application/json` | Formas farmacéuticas (comprimido, inyectable, …) |
-| `cima://maestras/vias-administracion` | `application/json` | Vías de administración (oral, IV, tópica, …) |
+| `UVICORN_HOST` | `127.0.0.1` | Loopback por defecto desde v0.4.16. `mcp-aemps up --bind-all` o `UVICORN_HOST=0.0.0.0` para Docker / reverse-proxy. |
+| `PORT` | `8765` | Puerto HTTP. Auto-fallback si está ocupado. |
+| `REDIS_URL` | — | Activa cache distribuida + rate-limit compartido entre réplicas. Opcional. |
+| `MCP_AEMPS_LOCALE` | auto | `es` / `en`. Auto-detecta del SO. |
+| `MCP_AEMPS_DNS_REBINDING_PROTECTION` | `true` | Validación `Host` / `Origin` en `/mcp`. Activado por defecto desde v0.4.16. Reverse-proxy: extiende `MCP_AEMPS_ALLOWED_HOSTS`. |
+| `METRICS_KEY` | — | **Requerido** para habilitar `/internal/metrics` (fail-closed desde v0.4.16). |
+| `OAUTH_ENABLED` | `false` | Activa modo OAuth 2.1 Resource-Server (multi-tenant SaaS). |
+| `LOG_LEVEL` | `INFO` | Nivel logging |
 
-### Templates (`resources/templates/list`)
-
-| URI template | Contenido |
-|---|---|
-| `cima://maestras/atc/{codigo}` | Lookup ATC por código (p.ej. C09AA02 → Enalapril) |
-| `cima://maestras/principios-activos/{id}` | Lookup principio activo por id AEMPS |
-| `cima://docs/ficha-tecnica/{nregistro}` | HTML completo de la ficha técnica |
-| `cima://docs/ficha-tecnica/{nregistro}/{seccion}` | Sección concreta de la FT (4.1, 4.8, 5.1, …) |
-| `cima://docs/prospecto/{nregistro}` | HTML completo del prospecto |
-| `cima://docs/prospecto/{nregistro}/{seccion}` | Sección concreta del prospecto (1, 2, 3, 4, 5, 6) |
-
-Disponibles en **ambos transportes** (stdio y `/mcp` HTTP) — desde v0.2.7 existe un único `FastMCP` server que sirve tools, prompts y resources para los dos lados.
+OAuth 2.1: cinco env vars (`OAUTH_ISSUER`, `OAUTH_JWKS_URL`, `OAUTH_AUDIENCE`, `OAUTH_REQUIRED_SCOPES`). RFC 9728 Protected Resource Metadata expuesto en `/.well-known/oauth-protected-resource`. Sin Authorization Server embebido — bring your own (Auth0 / Keycloak / Hydra / Stytch / Cloudflare). Detalles en [SECURITY.md](SECURITY.md).
 
 ---
 
-## Prompts MCP curados
+## Despliegue
 
-mcp-aemps entrega **10 [Prompts MCP](https://modelcontextprotocol.io/specification/server/prompts)** curados — plantillas de workflow definidas en el servidor que invocas explícitamente desde tu cliente MCP (Claude Desktop, Continue, Cursor, Zed, …). Orquestan las llamadas correctas a tools CIMA para los workflows profesionales y de paciente más comunes, así no tienes que recordar qué tools encadenar.
+**stdio (default).** Cada cliente MCP arranca `uvx mcp-aemps@latest stdio` bajo demanda. Sin servidor que mantener. Sin gestión de puertos. Es el patrón Anthropic-canonical — usa esto si solo quieres que tu agente local consulte CIMA.
 
-> **Disponibilidad en transportes**: los prompts se entregan en **ambos** transportes — stdio (`uvx mcp-aemps stdio`) y Streamable HTTP en `/mcp`. Desde v0.2.7 el transporte HTTP usa la app Streamable-HTTP nativa de FastMCP (sin indirección de fastapi-mcp), de modo que tools, prompts, resources y annotations se sirven todos desde la misma instancia FastMCP.
+**HTTP compartido (multi-usuario).** `mcp-aemps up --bind-all` + reverse-proxy (nginx / Caddy / Traefik) + `MCP_AEMPS_DNS_REBINDING_PROTECTION=true` + `MCP_AEMPS_ALLOWED_HOSTS=tu-dominio.com`. Con OAuth 2.1 activado para gating. Una sola instancia sirve a equipos enteros.
 
-### Catálogo
-
-| Prompt | Args | Caso de uso |
-|---|---|---|
-| **`identificar_cn`** | `cn` | **Farmacia comunitaria** — el paciente trae una caja con un Código Nacional; tarjeta resumen one-screen con autorización, comercialización, receta, alertas activas, suministro, fotos oficiales y enlaces a documentación AEMPS. |
-| **`equivalencias_genericas`** | `nregistro`, `comercializados_solo?` | **Farmacia comunitaria** — sustitución durante un desabastecimiento. Mismo principio activo + dosis + forma farmacéutica, con foto de la caja para confirmar visualmente. |
-| **`vigilancia_paciente`** | `nregistros[]` | **Farmacia hospitalaria** — revisión de notas de seguridad activas para la cartera de medicación de un paciente. Alineado con EMA GVP Module VI. |
-| **`comparar_fichas_tecnicas`** | `nregistros[]`, `secciones?` | **Hospital + industria** — tabla wide-format comparando 2-5 medicamentos sección a sección de la FT (4.1, 4.2, 4.3, 4.4, 4.5, 4.8 por defecto). |
-| **`auditar_cartera_laboratorio`** | `laboratorio`, `incluir_no_comercializados?` | **Industria** — snapshot regulatorio completo de un laboratorio: métricas globales, áreas terapéuticas (ATC), triángulo negro, top con notas activas, riesgos de suministro, presencia de IPT. |
-| **`monitorizar_cambios_cartera`** | `nregistros[]`, `desde_fecha?` | **Industria · regulatory affairs** — detecta cambios (alta, baja, modificación de FT/prospecto/comercialización/notas) sobre una lista de productos en un periodo. |
-| **`informe_posicionamiento_terapeutico`** | `nregistro` | **Hospital + industria** — recupera el Informe Público de Evaluación (IPE/IPT) de AEMPS junto con la indicación autorizada (FT 4.1) y el mecanismo de acción (FT 5.1). Marca explícitamente cuando AEMPS no ha publicado IPT. |
-| **`material_visual_paciente`** | `nregistro` | **Counseling al paciente** — fotos de la caja y de la pastilla, vídeos de uso (inhaladores, plumas de insulina, autoinyectores), material informativo segregado por audiencia. Cierra con disclaimer. |
-| **`info_medicamento_para_no_sanitarios`** | `nombre_o_cn` | **Público general** — resumen llano sin jerga: qué es, para qué se usa, cómo es (fotos), alertas activas, dónde leer más. Cierra con disclaimer obligatorio "no es consejo médico". |
-| **`comprobar_interaccion_principios_activos`** | `principios_activos[]` | **Farmacia hospitalaria + industria** — comprueba si la sección 4.5 (Interacciones) de las fichas técnicas AEMPS menciona interacciones cruzadas entre 2-5 principios activos. Búsqueda textual sobre documentación oficial; **NO sustituye una herramienta clínica formal** (BOT PLUS, Lexicomp, Stockley, Micromedex). |
-
-### Cómo se invoca
-
-En Claude Desktop (cuando el cliente lo soporta), aparecen como slash-commands `/mcp__mcp-aemps__<nombre>` en el menú de prompts, o se pueden listar via `prompts/list` desde cualquier cliente MCP-compliant.
-
-Ejemplo programático con el SDK MCP de Python:
-
-```python
-from mcp.client.stdio import stdio_client, StdioServerParameters
-from mcp import ClientSession
-
-params = StdioServerParameters(command="uvx", args=["mcp-aemps", "stdio"])
-async with stdio_client(params) as (read, write):
-    async with ClientSession(read, write) as session:
-        await session.initialize()
-        prompts = await session.list_prompts()
-        result = await session.get_prompt(
-            "identificar_cn",
-            arguments={"cn": "12345"},
-        )
-        # result.messages[0].content.text → el cuerpo del prompt listo para enviar al LLM
+**Docker / Compose.**
+```bash
+docker run -p 8765:8765 ghcr.io/romanpert/mcp-aemps:latest
+docker compose up -d   # con Redis opcional para cache distribuida
 ```
 
-### Diseño
+**MCP Registry.** Listado como `io.github.romanpert/mcp-aemps`. Los clientes MCP-aware lo descubren automáticamente.
 
-Cada prompt instruye al LLM **qué herramientas llamar, en qué orden y cómo formatear la salida**. Aprovechan la riqueza del payload de `obtener_medicamento` (que incluye `docs[]` con Ficha Técnica, Prospecto, Informe Público de Evaluación y Plan de Gestión de Riesgos; `fotos[]` con la caja y la forma farmacéutica; el flag `materialesInf` para vídeos vía `obtener_materiales`) en lugar de tratar CIMA como un simple lookup de campos.
-
-Los prompts **dirigidos a pacientes** (`material_visual_paciente`, `info_medicamento_para_no_sanitarios`, `comprobar_interaccion_principios_activos`) cierran siempre con un disclaimer explícito "no es consejo médico — consulte a su médico o farmacéutico". Está cubierto por test (`tests/test_prompts.py`); su eliminación accidental rompe CI.
+**Observabilidad.** `/health/live`, `/health/ready` (Kubernetes-friendly), `/internal/metrics` (gated por `METRICS_KEY`). Logs JSON estructurados con correlation IDs. Para Prometheus / OpenTelemetry, plug-in vía `extra_middleware` / `startup_hooks` del factory — ver `app/factory.py`.
 
 ---
 
-## Integración con Claude Code hooks
+## Hooks de auditoría (Claude Code)
 
-El [sistema de hooks de Claude Code](https://docs.anthropic.com/claude-code/hooks) ejecuta comandos shell client-side alrededor de cada invocación de tool, incluyendo llamadas a servidores MCP como mcp-aemps. El matcher `mcp__mcp-aemps__*` captura cada herramienta expuesta por este servidor. Dos recetas concretas para añadir a `~/.claude/settings.json`:
-
-### 1 · Auditar cada llamada mcp-aemps a un log JSONL
-
-Útil para audit trails GMP Annex 11 / EMA GVP — registro completo de qué tool se invocó con qué argumentos, cuándo, en qué sesión.
+El [sistema de hooks de Claude Code](https://docs.anthropic.com/claude-code/hooks) ejecuta comandos shell client-side alrededor de cada llamada a tool. El matcher `mcp__mcp-aemps__*` captura cada herramienta de este servidor — útil para audit trails GMP Annex 11 / EMA GVP.
 
 ```json
 {
@@ -350,64 +238,44 @@ El [sistema de hooks de Claude Code](https://docs.anthropic.com/claude-code/hook
 }
 ```
 
-El hook recibe la llamada de tool como JSON por stdin; `jq` la aplana a una línea por llamada. Rota `~/.claude/audit/` con `logrotate` o tu agente SIEM.
-
-### 2 · Enviar latencia por tool a un SIEM
-
-Empareja `PreToolUse` (start del timer) con `PostToolUse` (stop del timer) y haz POST del delta más el nombre de tool a tu endpoint de ingest del SIEM.
-
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "mcp__mcp-aemps__.*",
-        "hooks": [
-          { "type": "command", "command": "date +%s%N > /tmp/mcp-aemps.start" }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "mcp__mcp-aemps__.*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "END=$(date +%s%N); START=$(cat /tmp/mcp-aemps.start); ELAPSED_MS=$(( (END - START) / 1000000 )); jq -c --arg ms \"$ELAPSED_MS\" '{ts: now, tool: .tool_name, latency_ms: ($ms|tonumber), success: (.tool_response.error == null)}' | curl -sS -X POST -H 'content-type: application/json' --data-binary @- https://siem.example.com/ingest/mcp"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-> **Equivalente server-side.** mcp-aemps también expone `pre_tool_hooks` / `post_tool_hooks` en `create_app(...)` de modo que el mismo audit trail puede emitirse server-side independientemente del cliente MCP que se conecte (útil para despliegues compartidos donde no puedes confiar en que cada usuario tenga el `~/.claude/settings.json` correcto). Ver `app/tool_hooks.py`.
+Equivalente server-side disponible vía `pre_tool_hooks` / `post_tool_hooks` en `create_app(...)` — útil cuando no puedes confiar en que cada usuario tenga el `~/.claude/settings.json` correcto. Detalles en `app/tool_hooks.py`.
 
 ---
 
-## Seguridad
+## Compliance y seguridad
 
-- Usuario Docker non-root (UID 10001)
-- Cabeceras de seguridad: `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`
-- `pyjwt[crypto]` — sin `python-jose` (CVE-2024-33663)
-- Sin secretos en repo — toda configuración via env vars
-- CORS configurable, no `*` en producción
+mcp-aemps está construido para entornos regulados — sin sustituir el juicio profesional:
 
----
+- **Datos públicos AEMPS** — sin PII, sin patient data, sin clinical decision support.
+- **Audit trail** — logs JSON estructurados con correlation IDs, retención configurable (`LOG_RETENTION_DAYS`).
+- **Sin GPL en el paquete** — Apache-2.0 limpio, distribuible en stack farmacéutico privado.
+- **Threat model auditado** — STRIDE pass end-to-end por release. Política completa en [SECURITY.md](SECURITY.md).
+- **Disclosure coordinada** — `roman.p98@gmail.com`, triage en 48h.
 
-## Documentación de referencia
-
-Documentos AEMPS oficiales en [`docs/`](docs/):
-
-- [`CIMA_REST_API.pdf`](docs/CIMA_REST_API.pdf) — CIMA REST API v1.23
-- [`CIMA-problemas-suministro.pdf`](docs/CIMA-problemas-suministro.pdf) — API de Problemas de Suministro (AEMPS / Ministerio de Sanidad)
+Posture detallada (GDPR Art.5, LOPD-GDD, EU GMP Annex 11, EMA GVP Module VI): [CLAUDE.md](CLAUDE.md).
 
 ---
 
-## Licencia
+## Roadmap & versioning
 
-Apache-2.0 © [Román Pérez Dumpert](https://github.com/romanpert)
+mcp-aemps mirrorea el surface CIMA REST 1:1 — ni más, ni menos. Las mejoras hasta v1.0 son **calidad** (eficiencia, seguridad, escalabilidad, modularidad), no nuevas features.
 
-<!-- MCP Registry ownership marker — DO NOT REMOVE -->
-<sub><sup>mcp-name: io.github.romanpert/mcp-aemps</sup></sub>
+Add-ons que NO encajan en esta scope rule (extracción de PDF de IPT, descarga de imágenes de medicamentos, agregación multi-NCA, push notifications) viven en un repo separado, premium-tier, que importa este `mcp-aemps>=0.4.x` desde PyPI como dependencia.
+
+CHANGELOG completo: [CHANGELOG.md](CHANGELOG.md). Política de versionado en [CLAUDE.md](CLAUDE.md).
+
+---
+
+## Contribuir
+
+Issues y PRs en inglés. Conventional commits. Setup, estándares de código, y las hard scope rules en [CONTRIBUTING.md](CONTRIBUTING.md).
+
+> Si construyes algo serio sobre mcp-aemps en producción farmacéutica / hospitalaria, escríbeme — me interesa el use case, y los road-map items se priorizan en parte por demanda concreta.
+
+---
+
+## Licencia & autor
+
+Apache-2.0 · Author: **Román Pérez Dumpert** · `roman.p98@gmail.com`
+
+[![GitHub stars](https://img.shields.io/github/stars/romanpert/mcp-aemps?style=social)](https://github.com/romanpert/mcp-aemps/stargazers)

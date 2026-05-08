@@ -128,35 +128,69 @@ class InstallResult:
 
 
 def _app_executables(client_name: str) -> tuple[Path, ...]:
-    """Per-client, per-OS absolute paths where the *application's own*
-    binary or app bundle lives. Used by detection (``_check_client_installed``
-    and ``_client_not_detected_skip``) as a stronger signal than
-    ``config_dirs`` — the latter were created by mcp-aemps itself in
-    pre-v0.4.13 versions and survive uninstalls, producing perpetual
-    false-positive "client detected" reports.
+    """Per-client, per-OS absolute paths whose existence proves the
+    application is installed. Two kinds of paths qualify:
 
-    Returns paths appropriate for ``sys.platform``; empty tuple for
-    clients where ``path_binaries`` is the only meaningful signal
-    (CLI-only tools like Claude Code, Codex CLI). Only includes paths
-    that the application's own installer / packager creates — never
-    paths that mcp-aemps writes to.
+    1. **App binary / bundle** — `Code.exe`, `/Applications/Cursor.app`,
+       `%LOCALAPPDATA%\\Programs\\Zed\\Zed.exe`, etc.
+    2. **Telltale files the application itself creates** — e.g.
+       Claude Desktop's `%APPDATA%\\Claude\\Cache\\` (Electron Chromium
+       cache, only Claude creates this), Codex CLI's
+       `~/.codex/sessions/` (session history dir created by `codex`
+       login). Crucially, **never** include paths mcp-aemps writes to,
+       because those would resurrect the pre-v0.4.16 false-positive
+       bug where our own config dir counted as "client installed".
+
+    Used by ``_check_client_installed`` and
+    ``_client_not_detected_skip`` as a stronger signal than the
+    pre-v0.4.16 ``config_dirs`` heuristic. Returns paths appropriate
+    for ``sys.platform``; empty tuple for clients where
+    ``path_binaries`` is the only meaningful signal (rare — most CLI
+    tools also leave telltale data files behind).
     """
     plat = sys.platform
     home = Path.home()
     local = Path(os.environ.get("LOCALAPPDATA", "")) if plat == "win32" else None
     programs = Path(os.environ.get("PROGRAMFILES", "")) if plat == "win32" else None
+    appdata_env = os.environ.get("APPDATA") if plat == "win32" else None
+    appdata = Path(appdata_env) if appdata_env else None
 
     if client_name == "Claude Desktop":
         if plat == "win32" and local:
-            return (
-                local / "AnthropicClaude",  # Squirrel installer dir (versioned subdirs inside)
+            paths: list[Path] = [
+                # Squirrel installer (versioned subdirs inside).
+                local / "AnthropicClaude",
+                # Newer Programs install path.
                 local / "Programs" / "Claude",
-            )
+            ]
+            # Microsoft Store install ships under
+            # %LOCALAPPDATA%\Packages\Claude_<hash>; the hash is
+            # per-package so we glob.
+            packages_dir = local / "Packages"
+            if packages_dir.exists():
+                try:
+                    paths.extend(packages_dir.glob("Claude_*"))
+                except OSError:
+                    pass
+            # Electron app-data subdirs the running app creates on
+            # first launch. mcp-aemps only writes
+            # ``claude_desktop_config.json`` in this same parent
+            # dir; the Cache/ and Local Storage/ subdirs are
+            # exclusively Claude's, so their presence is positive
+            # evidence the user has launched Claude Desktop.
+            if appdata:
+                paths.append(appdata / "Claude" / "Cache")
+                paths.append(appdata / "Claude" / "Local Storage")
+            return tuple(paths)
         if plat == "darwin":
-            return (Path("/Applications/Claude.app"),)
+            return (
+                Path("/Applications/Claude.app"),
+                home / "Library" / "Application Support" / "Claude" / "Cache",
+            )
         return (
             Path("/snap/claude-desktop"),
             home / ".local" / "share" / "applications" / "claude-desktop.desktop",
+            home / ".config" / "Claude" / "Cache",
         )
     if client_name == "VS Code":
         if plat == "win32" and local and programs:
@@ -197,6 +231,29 @@ def _app_executables(client_name: str) -> tuple[Path, ...]:
             Path("/usr/local/bin/zed"),
             home / ".local" / "bin" / "zed",
         )
+    if client_name == "Codex CLI":
+        # CLI tool — primary signal is the `codex` binary on PATH
+        # (path_binaries). But some npm-global installs don't expose
+        # `codex` on every shell's PATH (npm bin dir not in $PATH,
+        # scoop/asdf indirection, MSYS shells inheriting Windows PATH
+        # incompletely). Codex creates these files on first login /
+        # session — mcp-aemps never touches them, so their presence
+        # is positive evidence Codex CLI is installed and used.
+        return (
+            home / ".codex" / "auth.json",
+            home / ".codex" / "sessions",
+            home / ".codex" / "logs_2.sqlite",
+        )
+    if client_name == "Gemini CLI":
+        # CLI tool, npm-global. Primary signal: `gemini` binary on
+        # PATH. Telltale: ``~/.gemini/oauth_creds.json`` (created on
+        # ``gemini login``). Don't include ``~/.gemini/settings.json``
+        # — that's the same file mcp-aemps writes, so its presence
+        # would not prove Gemini CLI is installed.
+        return (
+            home / ".gemini" / "oauth_creds.json",
+            home / ".gemini" / "google_account_id",
+        )
     if client_name == "Continue.dev":
         # VS Code extension; detection requires the host IDE installed
         # AND a Continue extension dir present (the extension itself
@@ -212,9 +269,8 @@ def _app_executables(client_name: str) -> tuple[Path, ...]:
         # Junie is a JetBrains IDE plugin — require any JetBrains IDE
         # config root (the IDE creates these, mcp-aemps doesn't touch
         # them). Plugin presence is too brittle to detect generically.
-        if plat == "win32":
-            appdata = Path(os.environ.get("APPDATA", "")) if os.environ.get("APPDATA") else None
-            return (appdata / "JetBrains",) if appdata else ()
+        if plat == "win32" and appdata:
+            return (appdata / "JetBrains",)
         if plat == "darwin":
             return (home / "Library" / "Application Support" / "JetBrains",)
         return (home / ".config" / "JetBrains",)
@@ -323,6 +379,7 @@ _CLIENT_INSTALL_HINTS: dict[str, str] = {
     "Continue.dev": "https://www.continue.dev/",
     "JetBrains Junie": "https://www.jetbrains.com/junie/",
     "Antigravity": "https://antigravity.google/",
+    "Gemini CLI": "https://github.com/google-gemini/gemini-cli",
 }
 
 
@@ -1566,12 +1623,108 @@ def uninstall_antigravity(*, server_key: str = SERVER_KEY, config_path: Path | N
 
 
 # ---------------------------------------------------------------------------
+# Gemini CLI (Google's @google/gemini-cli, npm-global, MCP-native)
+# ---------------------------------------------------------------------------
+# Schema verified against
+# https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md
+# (queried 2026-05-08): top-level ``mcpServers``, per-entry transport
+# inferred from the key shape — ``command``+``args`` for stdio, ``url``
+# for SSE, ``httpUrl`` for Streamable HTTP. No ``type`` discriminator.
+# Single config path on every OS (no APPDATA branching).
+def gemini_config_path() -> Path:
+    """Per-user config — ``~/.gemini/settings.json`` on every OS.
+    Workspace overrides at ``<project>/.gemini/settings.json`` are not
+    written by the user-scope installer."""
+    return Path.home() / ".gemini" / "settings.json"
+
+
+def install_gemini(
+    *,
+    url: str | None = None,
+    server_key: str = SERVER_KEY,
+    config_path: Path | None = None,
+    transport: str = "stdio",
+    force: bool = False,
+) -> InstallResult:
+    """Add to Gemini CLI's MCP config (~/.gemini/settings.json).
+
+    Defaults to stdio with the canonical ``uvx mcp-aemps@latest stdio``
+    launcher. For HTTP, Gemini CLI uses the field name ``httpUrl``
+    (Streamable HTTP) — distinct from every other client. SSE
+    (``url`` field) is intentionally not used here; the server speaks
+    Streamable HTTP, which is the modern transport.
+    """
+    path = config_path or gemini_config_path()
+    if not force and config_path is None:
+        skip = _client_not_detected_skip(
+            "Gemini CLI", path, config_dirs=(path.parent,), path_binaries=("gemini",)
+        )
+        if skip is not None:
+            return skip
+    warnings = _collect_install_warnings(
+        "Gemini CLI",
+        config_dirs=(path.parent,),
+        path_binaries=("gemini",),
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    config = _read_json(path)
+    config.setdefault("mcpServers", {})
+    purged = _purge_legacy_aliases(config["mcpServers"])
+    if purged:
+        warnings = (*warnings, f"NOTE: removed legacy alias(es) {', '.join(purged)} from {path}.")
+
+    if transport == "stdio":
+        # Gemini CLI's stdio shape: command + args (+ env, cwd
+        # optional). No ``type`` field; transport is inferred.
+        desired: dict[str, Any] = {"command": STDIO_COMMAND, "args": list(STDIO_ARGS)}
+        message_target = "(uvx auto-launch); restart Gemini CLI"
+        if w := _check_command_on_path(STDIO_COMMAND):
+            warnings = (*warnings, w)
+    else:
+        url = url or _default_url()
+        # Streamable HTTP uses ``httpUrl`` — NOT ``url`` (which is SSE)
+        # and NOT ``serverUrl`` (Windsurf / Antigravity). Getting this
+        # field wrong silently disables the server in Gemini CLI.
+        desired = {"httpUrl": url}
+        message_target = f"-> {url}; restart Gemini CLI"
+        warnings = (
+            *warnings,
+            f"NOTE: http transport requires a running server at {url} (start it with `mcp-aemps up`).",
+        )
+
+    existing = config["mcpServers"].get(server_key)
+    if existing == desired and not purged:
+        return InstallResult(
+            "Gemini CLI", path, "unchanged", f"{server_key} already configured", warnings=warnings
+        )
+
+    action = "updated" if (existing or purged) else "added"
+    config["mcpServers"][server_key] = desired
+    _atomic_write_json(path, config)
+    return InstallResult("Gemini CLI", path, action, f"{server_key} {message_target}", warnings=warnings)
+
+
+def uninstall_gemini(*, server_key: str = SERVER_KEY, config_path: Path | None = None) -> InstallResult:
+    path = config_path or gemini_config_path()
+    if not path.exists():
+        return InstallResult("Gemini CLI", path, "unchanged", f"{server_key} was not present")
+    config = _read_json(path)
+    servers = config.get("mcpServers", {})
+    if server_key in servers:
+        del servers[server_key]
+        _atomic_write_json(path, config)
+        return InstallResult("Gemini CLI", path, "removed", f"{server_key} removed")
+    return InstallResult("Gemini CLI", path, "unchanged", f"{server_key} was not present")
+
+
+# ---------------------------------------------------------------------------
 # Registry — used by the `mcp-aemps install` (no subcommand) "all" path
 # ---------------------------------------------------------------------------
 ALL_INSTALLERS = {
     "claude-desktop": install_claude_desktop,
     "claude-code": install_claude_code,
     "codex": install_codex,
+    "gemini": install_gemini,
     "vscode": install_vscode,
     "cursor": install_cursor,
     "windsurf": install_windsurf,
@@ -1585,6 +1738,7 @@ ALL_UNINSTALLERS = {
     "claude-desktop": uninstall_claude_desktop,
     "claude-code": uninstall_claude_code,
     "codex": uninstall_codex,
+    "gemini": uninstall_gemini,
     "vscode": uninstall_vscode,
     "cursor": uninstall_cursor,
     "windsurf": uninstall_windsurf,

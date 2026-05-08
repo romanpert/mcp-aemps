@@ -23,6 +23,7 @@ from app.installers import (
     install_codex,
     install_continue,
     install_cursor,
+    install_gemini,
     install_jetbrains,
     install_vscode,
     install_windsurf,
@@ -31,6 +32,7 @@ from app.installers import (
     uninstall_claude_desktop,
     uninstall_continue,
     uninstall_cursor,
+    uninstall_gemini,
     uninstall_jetbrains,
     uninstall_vscode,
     uninstall_windsurf,
@@ -573,3 +575,83 @@ def test_purge_idempotent_on_clean_config(tmp_path: Path) -> None:
     install_cursor(config_path=p)
     second = install_cursor(config_path=p)
     assert second.action == "unchanged", second
+
+
+# ---------------------------------------------------------------------------
+# Gemini CLI (Google's @google/gemini-cli, MCP-native, v0.4.17+)
+# ---------------------------------------------------------------------------
+
+
+def test_gemini_default_writes_stdio_no_type_field(tmp_path: Path) -> None:
+    """Gemini CLI's stdio shape: command + args, NO ``type``
+    discriminator (transport is inferred from which key is present)."""
+    p = tmp_path / "settings.json"
+    r = install_gemini(config_path=p)
+    assert r.action == "added"
+    entry = json.loads(p.read_text(encoding="utf-8"))["mcpServers"]["mcp-aemps"]
+    assert entry == {"command": "uvx", "args": UVX_LAUNCHER_ARGS}
+    assert "type" not in entry, "Gemini CLI does not use a type field"
+
+
+def test_gemini_http_mode_uses_httpurl_field(tmp_path: Path) -> None:
+    """Gemini CLI uses ``httpUrl`` for Streamable HTTP — NOT ``url``
+    (which is SSE) and NOT ``serverUrl`` (Windsurf / Antigravity).
+    Wrong field silently disables the server."""
+    p = tmp_path / "settings.json"
+    install_gemini(url="http://shared.example.com:9000/mcp", config_path=p, transport="http")
+    entry = json.loads(p.read_text(encoding="utf-8"))["mcpServers"]["mcp-aemps"]
+    assert entry == {"httpUrl": "http://shared.example.com:9000/mcp"}
+    assert "url" not in entry
+    assert "serverUrl" not in entry
+
+
+def test_gemini_idempotent(tmp_path: Path) -> None:
+    p = tmp_path / "settings.json"
+    install_gemini(config_path=p)
+    assert install_gemini(config_path=p).action == "unchanged"
+
+
+def test_gemini_preserves_other_entries(tmp_path: Path) -> None:
+    p = tmp_path / "settings.json"
+    p.write_text(
+        json.dumps(
+            {
+                "theme": "dark",
+                "mcpServers": {"weather": {"command": "python", "args": ["w.py"]}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    install_gemini(config_path=p)
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert data["theme"] == "dark", "non-mcp keys must be preserved"
+    assert "weather" in data["mcpServers"]
+    assert "mcp-aemps" in data["mcpServers"]
+
+
+def test_gemini_purges_legacy_alias(tmp_path: Path) -> None:
+    p = tmp_path / "settings.json"
+    p.write_text(
+        json.dumps({"mcpServers": {"aemps-cima": {"httpUrl": "http://localhost:8000/mcp"}}}),
+        encoding="utf-8",
+    )
+    res = install_gemini(config_path=p)
+    assert res.action in ("added", "updated")
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert "aemps-cima" not in data["mcpServers"]
+    assert "mcp-aemps" in data["mcpServers"]
+
+
+def test_gemini_uninstall(tmp_path: Path) -> None:
+    p = tmp_path / "settings.json"
+    install_gemini(config_path=p)
+    r = uninstall_gemini(config_path=p)
+    assert r.action == "removed"
+    assert uninstall_gemini(config_path=p).action == "unchanged"
+
+
+def test_gemini_in_all_installers_registry() -> None:
+    from app.installers import ALL_INSTALLERS, ALL_UNINSTALLERS
+
+    assert "gemini" in ALL_INSTALLERS
+    assert "gemini" in ALL_UNINSTALLERS

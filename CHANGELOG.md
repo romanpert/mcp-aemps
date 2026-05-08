@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.17] — 2026-05-08
+
+Coverage release: Gemini CLI joins the supported clients matrix
+and detection now correctly identifies Claude Desktop and Codex
+CLI when installed via channels that don't put a binary on PATH
+(Microsoft Store, npm-global with bin-dir gotchas).
+
+### Added
+
+- **Gemini CLI installer** (`mcp-aemps install gemini`). Targets
+  `~/.gemini/settings.json` with the `mcpServers` map. Stdio uses
+  `command`+`args` (no `type` discriminator — Gemini infers
+  transport). HTTP uses **`httpUrl`** (Streamable HTTP), distinct
+  from `url` (SSE) and `serverUrl` (Windsurf / Antigravity);
+  using the wrong field silently disables the server. Single
+  config path on every OS — no APPDATA branching. Schema verified
+  against the official `google-gemini/gemini-cli` repo (`docs/
+  tools/mcp-server.md`, queried 2026-05-08).
+- **Gemini CLI added to `ALL_INSTALLERS` / `ALL_UNINSTALLERS`** so
+  `mcp-aemps install` (no subcommand) covers it automatically when
+  Gemini CLI is detected on the host.
+
+### Fixed
+
+- **Claude Desktop detection now covers Microsoft Store installs.**
+  v0.4.16 only checked `%LOCALAPPDATA%\AnthropicClaude\` (Squirrel)
+  and `%LOCALAPPDATA%\Programs\Claude\`; Store installs land at
+  `%LOCALAPPDATA%\Packages\Claude_<hash>` and were therefore
+  reported as "not detected" → install skipped. v0.4.17 globs
+  `Packages\Claude_*` and additionally accepts the Electron
+  app-data subdirs (`%APPDATA%\Claude\Cache\`, `Local Storage\`)
+  as positive evidence the app has been launched. macOS / Linux
+  similarly pick up `~/Library/Application Support/Claude/Cache/`
+  and `~/.config/Claude/Cache/`.
+- **Codex CLI detection no longer requires `codex` on PATH.**
+  Some npm-global installs leave the binary out of every shell's
+  PATH (npm bin dir not in `$PATH`, scoop / asdf indirection,
+  MSYS shells inheriting Windows PATH incompletely). Detection
+  now also accepts `~/.codex/auth.json`, `~/.codex/sessions/`,
+  and `~/.codex/logs_2.sqlite` — all created by `codex` itself
+  on first login / session, never by mcp-aemps.
+
 ## [0.4.16] — 2026-05-08
 
 Two-track release: (1) the pre-1.0 hardening backlog from the
