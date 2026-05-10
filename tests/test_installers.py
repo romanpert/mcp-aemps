@@ -655,3 +655,87 @@ def test_gemini_in_all_installers_registry() -> None:
 
     assert "gemini" in ALL_INSTALLERS
     assert "gemini" in ALL_UNINSTALLERS
+
+
+# ---------------------------------------------------------------------------
+# v0.5.0 — strict detection (no host-IDE false positives)
+# ---------------------------------------------------------------------------
+
+
+def test_continue_detection_globs_extension_dir(monkeypatch, tmp_path: Path) -> None:
+    """Continue.dev detection requires the actual extension dir
+    (versioned, prefix `continue.continue-`), NOT just a host
+    IDE's extensions/ folder. The latter would false-positive
+    whenever VS Code is installed."""
+    from app import installers
+
+    monkeypatch.setattr(installers.Path, "home", lambda: tmp_path)
+
+    # Set up a fake VS Code with NO Continue extension — must be
+    # NOT detected.
+    vscode_extensions = tmp_path / ".vscode" / "extensions"
+    vscode_extensions.mkdir(parents=True)
+    (vscode_extensions / "ms-python.python-2024.0.0").mkdir()
+    assert not installers._app_glob_present("Continue.dev"), (
+        "host IDE without Continue extension must NOT be detected"
+    )
+
+    # Add the Continue extension dir — now detection must hit.
+    (vscode_extensions / "continue.continue-1.2.3").mkdir()
+    assert installers._app_glob_present("Continue.dev"), "Continue extension dir present must be detected"
+
+
+def test_junie_detection_requires_junie_only_files(monkeypatch, tmp_path: Path) -> None:
+    """JetBrains Junie detection requires Junie-specific files
+    (`AGENTS.md`, `.aiignore`), NOT just the JetBrains config
+    root. Otherwise any user with PyCharm or IntelliJ would be
+    falsely detected as having Junie."""
+    from app import installers
+
+    monkeypatch.setattr(installers.Path, "home", lambda: tmp_path)
+
+    # An empty ~/.junie/ (which mcp-aemps could have created
+    # writing mcp.json) must NOT count as Junie installed.
+    (tmp_path / ".junie").mkdir()
+    paths = installers._app_executables("JetBrains Junie")
+    assert not any(p.exists() for p in paths), "empty ~/.junie/ must not satisfy detection"
+
+    # Once Junie itself drops AGENTS.md, detection hits.
+    (tmp_path / ".junie" / "AGENTS.md").write_text("# project guidance", encoding="utf-8")
+    paths = installers._app_executables("JetBrains Junie")
+    assert any(p.exists() for p in paths), "AGENTS.md must satisfy detection"
+
+
+def test_claude_desktop_linux_returns_empty(monkeypatch) -> None:
+    """Anthropic does not ship Claude Desktop on Linux. Pre-v0.5
+    we made up `/snap/claude-desktop` paths — that's gone."""
+    from app import installers
+
+    monkeypatch.setattr(installers.sys, "platform", "linux")
+    paths = installers._app_executables("Claude Desktop")
+    assert paths == (), f"Claude Desktop on Linux must return empty paths, got {paths}"
+
+
+def test_gemini_telltale_paths_removed(monkeypatch) -> None:
+    """Pre-v0.5 we guessed `~/.gemini/oauth_creds.json` and
+    `~/.gemini/google_account_id` as detection signals. Official
+    Gemini CLI docs don't publish stable filenames, so those
+    guesses are gone — detection now relies on `gemini` on PATH
+    only (false-negatives acceptable, false-positives are not)."""
+    from app import installers
+
+    paths = installers._app_executables("Gemini CLI")
+    assert paths == (), f"Gemini CLI must rely on PATH only, got {paths}"
+
+
+def test_readme_carries_mcp_name_marker() -> None:
+    """The MCP Registry publish endpoint validates that the package
+    README contains `mcp-name: <server-name>` literal. v0.4.17
+    release failed with HTTP 400 because the marker was missing.
+    Both READMEs ship the marker; both must keep it for every
+    future release."""
+    repo_root = Path(__file__).parent.parent
+    expected = "mcp-name: io.github.romanpert/mcp-aemps"
+    for readme in (repo_root / "README.md", repo_root / "README.en.md"):
+        text = readme.read_text(encoding="utf-8")
+        assert expected in text, f"{readme.name} missing MCP Registry marker `{expected}`"

@@ -131,22 +131,26 @@ def _app_executables(client_name: str) -> tuple[Path, ...]:
     """Per-client, per-OS absolute paths whose existence proves the
     application is installed. Two kinds of paths qualify:
 
-    1. **App binary / bundle** — `Code.exe`, `/Applications/Cursor.app`,
-       `%LOCALAPPDATA%\\Programs\\Zed\\Zed.exe`, etc.
+    1. **App binary / bundle** — ``Code.exe``,
+       ``/Applications/Cursor.app``,
+       ``%LOCALAPPDATA%\\Programs\\Zed\\Zed.exe``, etc.
     2. **Telltale files the application itself creates** — e.g.
-       Claude Desktop's `%APPDATA%\\Claude\\Cache\\` (Electron Chromium
-       cache, only Claude creates this), Codex CLI's
-       `~/.codex/sessions/` (session history dir created by `codex`
-       login). Crucially, **never** include paths mcp-aemps writes to,
-       because those would resurrect the pre-v0.4.16 false-positive
-       bug where our own config dir counted as "client installed".
+       Codex CLI's ``~/.codex/sessions/`` (session history dir
+       created by ``codex`` login), Junie's ``~/.junie/AGENTS.md``
+       (Junie-created project guidance file).
 
-    Used by ``_check_client_installed`` and
-    ``_client_not_detected_skip`` as a stronger signal than the
-    pre-v0.4.16 ``config_dirs`` heuristic. Returns paths appropriate
-    for ``sys.platform``; empty tuple for clients where
-    ``path_binaries`` is the only meaningful signal (rare — most CLI
-    tools also leave telltale data files behind).
+    **Never** include paths mcp-aemps writes to, because those would
+    resurrect the pre-v0.4.16 false-positive bug where our own
+    config dir counted as "client installed".
+
+    Verified against official docs 2026-05-10 (see
+    ``memory/reference_cli_install_paths.md``). For clients whose
+    detection requires a glob (Continue.dev's versioned extension
+    dir), see ``_app_glob_present`` instead — those don't fit the
+    Path-tuple contract.
+
+    Returns paths appropriate for ``sys.platform``; empty tuple for
+    clients whose detection is glob-only or PATH-only.
     """
     plat = sys.platform
     home = Path.home()
@@ -156,11 +160,14 @@ def _app_executables(client_name: str) -> tuple[Path, ...]:
     appdata = Path(appdata_env) if appdata_env else None
 
     if client_name == "Claude Desktop":
+        # Anthropic ships Claude Desktop on Windows + macOS only —
+        # there is no official Linux build (https://claude.ai/download).
         if plat == "win32" and local:
             paths: list[Path] = [
-                # Squirrel installer (versioned subdirs inside).
+                # NSIS installer (default Windows download).
                 local / "AnthropicClaude",
-                # Newer Programs install path.
+                # Older Squirrel-style location, kept for users
+                # upgraded across installers.
                 local / "Programs" / "Claude",
             ]
             # Microsoft Store install ships under
@@ -172,13 +179,14 @@ def _app_executables(client_name: str) -> tuple[Path, ...]:
                     paths.extend(packages_dir.glob("Claude_*"))
                 except OSError:
                     pass
-            # Electron app-data subdirs the running app creates on
-            # first launch. mcp-aemps only writes
-            # ``claude_desktop_config.json`` in this same parent
-            # dir; the Cache/ and Local Storage/ subdirs are
-            # exclusively Claude's, so their presence is positive
-            # evidence the user has launched Claude Desktop.
+            # Electron app-data files Claude creates on first launch.
+            # mcp-aemps writes ``claude_desktop_config.json`` in this
+            # same parent dir, so the parent dir is NOT a valid
+            # signal — but ``logs/mcp.log`` (the MCP wire log) and
+            # ``Cache/`` / ``Local Storage/`` (Electron Chromium
+            # subdirs) are created exclusively by Claude itself.
             if appdata:
+                paths.append(appdata / "Claude" / "logs" / "mcp.log")
                 paths.append(appdata / "Claude" / "Cache")
                 paths.append(appdata / "Claude" / "Local Storage")
             return tuple(paths)
@@ -186,107 +194,177 @@ def _app_executables(client_name: str) -> tuple[Path, ...]:
             return (
                 Path("/Applications/Claude.app"),
                 home / "Library" / "Application Support" / "Claude" / "Cache",
+                home / "Library" / "Logs" / "Claude" / "mcp.log",
             )
-        return (
-            Path("/snap/claude-desktop"),
-            home / ".local" / "share" / "applications" / "claude-desktop.desktop",
-            home / ".config" / "Claude" / "Cache",
-        )
+        # Linux: no official Claude Desktop build. Return empty to
+        # report "not detected" cleanly — pre-v0.4.17 we made up
+        # `/snap/claude-desktop` paths that never existed.
+        return ()
     if client_name == "VS Code":
         if plat == "win32" and local and programs:
             return (
+                # User installer (default download from code.visualstudio.com).
                 local / "Programs" / "Microsoft VS Code" / "Code.exe",
+                # System installer (admin-wide install).
                 programs / "Microsoft VS Code" / "Code.exe",
             )
         if plat == "darwin":
             return (Path("/Applications/Visual Studio Code.app"),)
         return (
+            # deb/rpm installs.
             Path("/usr/share/code/code"),
-            Path("/snap/bin/code"),
             Path("/usr/bin/code"),
+            # Snap install.
+            Path("/snap/bin/code"),
         )
     if client_name == "Cursor":
         if plat == "win32" and local:
-            return (local / "Programs" / "cursor" / "Cursor.exe",)
+            return (
+                local / "Programs" / "cursor" / "Cursor.exe",
+                local / "Programs" / "Cursor" / "Cursor.exe",
+            )
         if plat == "darwin":
             return (Path("/Applications/Cursor.app"),)
+        # Linux: AppImage with no enforced install location. Cursor
+        # creates ~/.config/Cursor/ (Electron app data) on first
+        # launch — mcp-aemps writes ~/.cursor/mcp.json, NOT
+        # ~/.config/Cursor/, so this directory is a Cursor-only
+        # signal.
         return (
             Path("/opt/Cursor/cursor"),
             Path("/usr/bin/cursor"),
             home / ".local" / "bin" / "cursor",
+            home / ".config" / "Cursor",
         )
     if client_name == "Windsurf":
         if plat == "win32" and local:
             return (local / "Programs" / "Windsurf" / "Windsurf.exe",)
         if plat == "darwin":
             return (Path("/Applications/Windsurf.app"),)
-        return (Path("/usr/share/windsurf/windsurf"),)
+        # Linux: no official deb/rpm — config-dir under ~/.codeium
+        # is created by Windsurf itself, but only when it's been
+        # launched at least once (mcp-aemps writes the
+        # mcp_config.json *inside* it but doesn't create the
+        # surrounding ~/.codeium hierarchy).
+        return (
+            Path("/usr/share/windsurf/windsurf"),
+            home / ".codeium" / "windsurf" / "machine_uuid",
+        )
     if client_name == "Zed":
         if plat == "win32" and local:
-            return (local / "Programs" / "Zed" / "Zed.exe",)
+            # winget default lands directly under %LOCALAPPDATA%\Zed\
+            # (no Programs subdir).
+            return (
+                local / "Zed" / "Zed.exe",
+                local / "Programs" / "Zed" / "Zed.exe",
+            )
         if plat == "darwin":
             return (Path("/Applications/Zed.app"),)
         return (
             Path("/snap/bin/zed"),
             Path("/usr/local/bin/zed"),
             home / ".local" / "bin" / "zed",
+            home / ".local" / "zed.app",  # zed install.sh default
         )
     if client_name == "Codex CLI":
-        # CLI tool — primary signal is the `codex` binary on PATH
-        # (path_binaries). But some npm-global installs don't expose
-        # `codex` on every shell's PATH (npm bin dir not in $PATH,
-        # scoop/asdf indirection, MSYS shells inheriting Windows PATH
-        # incompletely). Codex creates these files on first login /
-        # session — mcp-aemps never touches them, so their presence
-        # is positive evidence Codex CLI is installed and used.
+        # CLI tool — primary signal is the ``codex`` binary on PATH
+        # (path_binaries). But npm-global installs sometimes miss
+        # PATH on bash/MSYS shells. Codex creates these files on
+        # first login / session — mcp-aemps never touches them, so
+        # their presence is positive evidence.
         return (
             home / ".codex" / "auth.json",
             home / ".codex" / "sessions",
-            home / ".codex" / "logs_2.sqlite",
+            home / ".codex" / "log",
         )
+    if client_name == "Claude Code":
+        # CLI tool — primary signal is the ``claude`` binary on PATH
+        # (path_binaries). Telltale: ``~/.claude/credentials.json``
+        # is created by ``claude`` itself after the OAuth flow;
+        # mcp-aemps writes ``~/.claude.json`` (note: no slash) and
+        # never touches the credentials file.
+        return (home / ".claude" / "credentials.json",)
     if client_name == "Gemini CLI":
-        # CLI tool, npm-global. Primary signal: `gemini` binary on
-        # PATH. Telltale: ``~/.gemini/oauth_creds.json`` (created on
-        # ``gemini login``). Don't include ``~/.gemini/settings.json``
-        # — that's the same file mcp-aemps writes, so its presence
-        # would not prove Gemini CLI is installed.
-        return (
-            home / ".gemini" / "oauth_creds.json",
-            home / ".gemini" / "google_account_id",
-        )
+        # CLI tool, npm-global. Primary signal: ``gemini`` binary on
+        # PATH. Official docs do NOT publish a stable filename for
+        # the auth credential cache, so we don't list a telltale
+        # path here — false negatives (user has Gemini CLI but not
+        # logged in yet) are acceptable; false positives from a
+        # guessed filename are not.
+        return ()
     if client_name == "Continue.dev":
-        # VS Code extension; detection requires the host IDE installed
-        # AND a Continue extension dir present (the extension itself
-        # creates these — mcp-aemps only touches ~/.continue/config.yaml).
-        # We approximate by requiring any extensions dir variant.
+        # VS Code / JetBrains extension. Detection is glob-based
+        # (versioned extension dir) and lives in
+        # ``_app_glob_present`` — return empty here so the generic
+        # path-existence check doesn't run.
+        return ()
+    if client_name == "JetBrains Junie":
+        # Junie is a JetBrains IDE plugin — but it also creates
+        # specific files under ``~/.junie/`` that mcp-aemps does
+        # NOT touch. ``AGENTS.md`` (project guidance) and
+        # ``.aiignore`` (Junie's gitignore-equivalent) are
+        # Junie-only artifacts. mcp-aemps writes
+        # ``~/.junie/mcp.json`` only, so the directory itself is
+        # not a valid signal.
         return (
+            home / ".junie" / "AGENTS.md",
+            home / ".junie" / ".aiignore",
+        )
+    if client_name == "Antigravity":
+        if plat == "win32" and local and appdata:
+            return (
+                local / "Programs" / "Antigravity" / "antigravity.exe",
+                local / "Programs" / "antigravity" / "antigravity.exe",
+                appdata / "Antigravity",  # Electron app data on first launch
+            )
+        if plat == "darwin":
+            return (
+                Path("/Applications/Antigravity.app"),
+                home / "Library" / "Application Support" / "Antigravity",
+            )
+        return (
+            Path("/usr/bin/antigravity"),
+            home / ".local" / "bin" / "antigravity",
+            home / ".config" / "Antigravity",
+        )
+    return ()
+
+
+def _app_glob_present(client_name: str) -> bool:
+    """Glob-based detection for clients whose canonical install
+    artifact has a varying suffix (extension version, plugin
+    version) but a stable prefix. Used in addition to
+    ``_app_executables`` for the small set of clients where
+    fixed-path detection isn't enough.
+
+    Returns True iff at least one parent directory has a child
+    matching the per-client glob pattern. Falsy on read errors
+    (best-effort).
+    """
+    home = Path.home()
+    if client_name == "Continue.dev":
+        # Continue.dev marketplace ID is ``Continue.continue`` but
+        # the on-disk extension dir is lowercased to
+        # ``continue.continue-X.Y.Z`` (X.Y.Z varies). The host
+        # IDE's extensions/ folder is the parent. We never write to
+        # any of these dirs, so a glob hit proves the *extension*
+        # is installed (not just the host IDE).
+        parents = (
             home / ".vscode" / "extensions",
             home / ".vscode-insiders" / "extensions",
             home / ".cursor" / "extensions",
             home / ".windsurf" / "extensions",
         )
-    if client_name == "JetBrains Junie":
-        # Junie is a JetBrains IDE plugin — require any JetBrains IDE
-        # config root (the IDE creates these, mcp-aemps doesn't touch
-        # them). Plugin presence is too brittle to detect generically.
-        if plat == "win32" and appdata:
-            return (appdata / "JetBrains",)
-        if plat == "darwin":
-            return (home / "Library" / "Application Support" / "JetBrains",)
-        return (home / ".config" / "JetBrains",)
-    if client_name == "Antigravity":
-        if plat == "win32" and local:
-            return (
-                local / "Programs" / "Antigravity" / "antigravity.exe",
-                local / "Programs" / "antigravity" / "antigravity.exe",
-            )
-        if plat == "darwin":
-            return (Path("/Applications/Antigravity.app"),)
-        return (
-            Path("/usr/bin/antigravity"),
-            home / ".local" / "bin" / "antigravity",
-        )
-    return ()
+        for parent in parents:
+            if not parent.exists():
+                continue
+            try:
+                for _ in parent.glob("continue.continue-*"):
+                    return True
+            except OSError:
+                continue
+        return False
+    return False
 
 
 def _client_not_detected_skip(
@@ -325,6 +403,8 @@ def _client_not_detected_skip(
     if any(shutil.which(b) for b in path_binaries):
         return None
     if any(p.exists() for p in _app_executables(client_name)):
+        return None
+    if _app_glob_present(client_name):
         return None
 
     hint = _CLIENT_INSTALL_HINTS.get(client_name, "")
@@ -430,6 +510,8 @@ def _check_client_installed(
     if any(shutil.which(b) for b in path_binaries):
         return None
     if any(p.exists() for p in _app_executables(client_name)):
+        return None
+    if _app_glob_present(client_name):
         return None
 
     hint = _CLIENT_INSTALL_HINTS.get(client_name, "")

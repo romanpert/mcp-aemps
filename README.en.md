@@ -4,6 +4,8 @@
 
 <h1 align="center">mcp-aemps</h1>
 
+<!-- mcp-name: io.github.romanpert/mcp-aemps -->
+
 <p align="center">
   <strong>Official pharmaceutical data, ready for your agent.</strong><br/>
   The first open-source MCP server for the pharmaceutical industry. <strong>20,000+ AEMPS-authorised medicines</strong>, real-time, regulator-grade.
@@ -281,3 +283,7 @@ Issues and PRs in English. Conventional commits. Setup, code standards, and the 
 Apache-2.0 · Author: **Román Pérez Dumpert** · `roman.p98@gmail.com`
 
 [![GitHub stars](https://img.shields.io/github/stars/romanpert/mcp-aemps?style=social)](https://github.com/romanpert/mcp-aemps/stargazers)
+
+---
+
+<sub>MCP Registry identifier: `mcp-name: io.github.romanpert/mcp-aemps`</sub>

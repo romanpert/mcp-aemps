@@ -5,6 +5,89 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-05-10
+
+MINOR bump. Two reasons: (1) the v0.4.17 release tag failed MCP
+Registry validation because the README didn't carry the
+`mcp-name` identifier the registry validator now requires; (2) the
+client-detection refactor in v0.4.16/v0.4.17 had two remaining
+false-positive cases (Continue.dev and JetBrains Junie) where
+detection counted the *host IDE* as installation evidence
+instead of the specific extension/plugin. Both are
+behaviour changes for `mcp-aemps install` — clients that pre-v0.5
+showed up as "detected" when they actually weren't installed will
+now correctly show up as "not detected" and skip. Bundled into a
+MINOR rather than yet another PATCH per maintainer direction.
+
+### Added
+
+- **`mcp-name: io.github.romanpert/mcp-aemps` marker** in both
+  README.md and README.en.md (HTML comment near the title plus a
+  visible footer line). Required by the MCP Registry publish
+  endpoint for ownership validation; v0.4.17's `release.yml` MCP
+  Registry job failed with HTTP 400 without it.
+
+### Fixed
+
+- **Continue.dev detection now requires the actual extension to
+  be installed**, not just any host IDE. v0.4.16 detection
+  treated the presence of `~/.vscode/extensions/`,
+  `~/.cursor/extensions/`, etc. as evidence of Continue.dev — but
+  those directories belong to the host IDE, not Continue. v0.5.0
+  globs the extensions directories for the stable prefix
+  `continue.continue-*` (lowercased on disk; version suffix
+  varies). False-positive eliminated.
+- **JetBrains Junie detection now requires Junie-only artifacts**.
+  v0.4.16 detection treated `~/.config/JetBrains/` (or per-OS
+  equivalents) as evidence of Junie — but that directory is the
+  config root for *any* JetBrains IDE, not specifically Junie.
+  v0.5.0 instead checks for `~/.junie/AGENTS.md` and
+  `~/.junie/.aiignore`, which are created by Junie itself.
+  mcp-aemps writes only `~/.junie/mcp.json` so the directory
+  itself remains an invalid signal.
+- **Claude Desktop on Linux returns empty detection paths**
+  (was: made-up `/snap/claude-desktop` / `~/.local/share/...`
+  desktop-file paths that never existed in any official build).
+  Anthropic publishes Claude Desktop only for Windows + macOS;
+  pretending Linux paths exist created a quiet inconsistency.
+- **Antigravity detection adds Electron app-data telltales**
+  (`%APPDATA%\Antigravity\` on Windows,
+  `~/Library/Application Support/Antigravity/` on macOS,
+  `~/.config/Antigravity/` on Linux). Pre-v0.5 only checked the
+  binary path, which missed any user who downloaded but had not
+  yet launched the app.
+- **VS Code system-installer path added**
+  (`%PROGRAMFILES%\Microsoft VS Code\Code.exe`) — pre-v0.5 only
+  checked the User installer path under `%LOCALAPPDATA%`.
+- **Zed winget install path added** (`%LOCALAPPDATA%\Zed\Zed.exe`,
+  no `Programs\` subdir — winget puts it directly under the Zed
+  parent). Pre-v0.5 only matched the older `Programs\Zed\`
+  installer pattern.
+- **Cursor / Windsurf Linux telltales added**
+  (`~/.config/Cursor/`, `~/.codeium/windsurf/machine_uuid`) for
+  AppImage installs that don't enforce a fixed binary path.
+- **Codex CLI telltale `~/.codex/log/`** (the log directory
+  Codex creates) replaces the older single-file
+  `~/.codex/logs_2.sqlite` reference, which was specific to one
+  internal version.
+- **Gemini CLI telltale paths removed** — the official Gemini CLI
+  docs do not publish a stable filename for the auth credential
+  cache, so v0.4.17's guessed `oauth_creds.json` /
+  `google_account_id` paths are dropped. Detection falls back to
+  `gemini` on PATH only. False-negatives (user has Gemini CLI
+  but `gemini` is not on PATH) are acceptable; false-positives
+  from a guessed filename are not.
+
+### Internal
+
+- `_app_glob_present(client_name)` helper added alongside
+  `_app_executables`. Used for the small set of clients whose
+  canonical install artifact has a varying suffix (extension
+  version, plugin version) but a stable prefix.
+- `memory/reference_cli_install_paths.md` updated with verified
+  source URLs for every client and the new detection rules. Use
+  it as the source of truth for future installer additions.
+
 ## [0.4.17] — 2026-05-08
 
 Coverage release: Gemini CLI joins the supported clients matrix
